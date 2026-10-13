@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { groupByReadingDate } from '../core/grouping';
 import { STATUS_LABEL, ShelfEntry, ShelfStatus } from '../core/models';
 import { authorsLabel, matchesQuery } from '../core/text';
 import { BookCover } from './book-cover';
@@ -17,7 +18,7 @@ function storedView(): ViewMode {
   }
 }
 
-/** Lista de livros com filtro por status, busca por título/autor e modo grade ou lista. */
+/** Lista de livros agrupada pela data de leitura, com filtro por status, busca por título/autor e modo grade ou lista. */
 @Component({
   selector: 'app-book-collection',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -58,9 +59,10 @@ export class BookCollection {
     const query = this.query();
     return this.entries()
       .filter((e) => filter === 'all' || e.status === filter)
-      .filter((e) => matchesQuery(query, e.title, e.authors))
-      .sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
+      .filter((e) => matchesQuery(query, e.title, e.authors));
   });
+
+  protected readonly groups = computed(() => groupByReadingDate(this.visible()));
 
   protected setView(view: ViewMode) {
     this.view.set(view);

@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { AuthService } from './auth.service';
 import { db } from './firebase';
+import { lastFinishedDate } from './grouping';
 import { Book, Goal, LogKind, ReadingLog, ShelfEntry, ShelfStatus } from './models';
 import { isoDate } from './text';
 import { weekStart } from './stats';
@@ -37,7 +38,7 @@ export class ShelfService {
   readonly lastRead = computed(() =>
     this.entries()
       .filter((e) => e.status === 'read' && e.finishedDates?.length)
-      .sort((a, b) => lastDate(b).localeCompare(lastDate(a)) || b.updatedAt - a.updatedAt)
+      .sort((a, b) => lastFinishedDate(b).localeCompare(lastFinishedDate(a)) || b.updatedAt - a.updatedAt)
       .slice(0, 2),
   );
 
@@ -308,10 +309,6 @@ export class ShelfService {
     const snap = await getDocs(collection(db, 'users', uid, 'shelf'));
     return snap.docs.map((d) => normalizeEntry(d.data() as ShelfEntry));
   }
-}
-
-function lastDate(entry: ShelfEntry): string {
-  return [...(entry.finishedDates ?? [])].sort().pop() ?? '';
 }
 
 function normalizeEntry(entry: ShelfEntry): ShelfEntry {

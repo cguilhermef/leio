@@ -26,44 +26,49 @@
 </div>
 
 @if (visible().length) {
-  @if (view() === 'grid') {
-    <ul class="grid">
-      @for (e of visible(); track e.bookId) {
-        <li>
-          <a [routerLink]="['/livro', e.bookId]" [title]="e.title">
-            <app-book-cover [url]="e.coverUrl" [title]="e.title" />
-            @if (e.status === 'reading' && e.pages) {
-              <span class="bar"><span [style.width.%]="progress(e)"></span></span>
-            }
-          </a>
-        </li>
-      }
-    </ul>
-  } @else {
-    <ul class="rows">
-      @for (e of visible(); track e.bookId) {
-        <li>
-          <a [routerLink]="['/livro', e.bookId]">
-            <app-book-cover class="thumb" [url]="e.coverUrl" [title]="e.title" />
-            <span class="info">
-              <strong>{{ e.title }}</strong>
-              <span class="muted">{{ authorsLabel(e.authors) }}</span>
-              <span class="meta">
-                <span class="status status-{{ e.status }}">{{ statusLabel[e.status] }}</span>
+  @for (group of groups(); track group.key) {
+    <section class="group">
+      <h2 class="group-title">{{ group.label }} <span class="count">{{ group.entries.length }}</span></h2>
+      @if (view() === 'grid') {
+        <ul class="grid">
+          @for (e of group.entries; track e.bookId) {
+            <li>
+              <a [routerLink]="['/livro', e.bookId]" [title]="e.title">
+                <app-book-cover [url]="e.coverUrl" [title]="e.title" />
                 @if (e.status === 'reading' && e.pages) {
-                  <span>pág. {{ e.currentPage }} de {{ e.pages }}</span>
-                } @else if (e.pages) {
-                  <span>{{ e.pages }} páginas</span>
+                  <span class="bar"><span [style.width.%]="progress(e)"></span></span>
                 }
-                @if (e.reads > 1) {
-                  <span>{{ e.reads }} leituras</span>
-                }
-              </span>
-            </span>
-          </a>
-        </li>
+              </a>
+            </li>
+          }
+        </ul>
+      } @else {
+        <ul class="rows">
+          @for (e of group.entries; track e.bookId) {
+            <li>
+              <a [routerLink]="['/livro', e.bookId]">
+                <app-book-cover class="thumb" [url]="e.coverUrl" [title]="e.title" />
+                <span class="info">
+                  <strong>{{ e.title }}</strong>
+                  <span class="muted">{{ authorsLabel(e.authors) }}</span>
+                  <span class="meta">
+                    <span class="status status-{{ e.status }}">{{ statusLabel[e.status] }}</span>
+                    @if (e.status === 'reading' && e.pages) {
+                      <span>pág. {{ e.currentPage }} de {{ e.pages }}</span>
+                    } @else if (e.pages) {
+                      <span>{{ e.pages }} páginas</span>
+                    }
+                    @if (e.reads > 1) {
+                      <span>{{ e.reads }} leituras</span>
+                    }
+                  </span>
+                </span>
+              </a>
+            </li>
+          }
+        </ul>
       }
-    </ul>
+    </section>
   }
 } @else {
   <p class="empty">{{ query() ? 'Nenhum livro encontrado para esta busca.' : emptyText() }}</p>
