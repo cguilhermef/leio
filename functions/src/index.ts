@@ -5,6 +5,7 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { defineInt, defineSecret, defineString } from 'firebase-functions/params';
 import OpenAI from 'openai';
+import { rankEditions } from './ranking';
 
 initializeApp();
 const db = getFirestore();
@@ -284,7 +285,8 @@ async function searchGoogleBooks(title: string, authors: string[]): Promise<Onli
   let failures = 0;
   for (const q of queries) {
     try {
-      for (const edition of await googleBooksQuery(q)) {
+      // Descarta resultados de outros livros/autores que as consultas mais amplas trazem.
+      for (const edition of rankEditions(await googleBooksQuery(q), title, authors)) {
         if (!seen.has(edition.coverUrl)) {
           seen.add(edition.coverUrl);
           found.push(edition);
@@ -383,9 +385,9 @@ export const searchBook = onCall({ secrets: [GOOGLE_BOOKS_API_KEY] }, async (req
   // Avisa o app quando a busca online falhou (e não apenas veio vazia), para sugerir nova tentativa.
   const onlineFailed = failedSources === 2;
 
-  // Google Books primeiro (melhor para edições brasileiras); Open Library completa.
+  // Mais relevantes primeiro; no empate, Google Books (melhor para edições brasileiras).
   const seen = new Set<string>();
-  const editions = [...google, ...openLibrary.slice(0, Math.max(0, 12 - google.length))]
+  const editions = rankEditions([...google, ...openLibrary], cleanTitle, cleanAuthors)
     .filter((e) => !seen.has(e.coverUrl) && seen.add(e.coverUrl))
     .slice(0, 12);
   return { matches, editions, onlineFailed };

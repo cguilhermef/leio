@@ -84,6 +84,11 @@ export class AddBookPage {
   protected readonly matches = signal<Book[]>([]);
   protected readonly editions = signal<OnlineEdition[]>([]);
   protected readonly onlineFailed = signal(false);
+  /** Capas que não carregaram ou são apenas o aviso de "imagem indisponível". */
+  private readonly hiddenCovers = signal(new Set<string>());
+  protected readonly visibleEditions = computed(() =>
+    this.editions().filter((e) => !this.hiddenCovers().has(e.coverUrl)),
+  );
   protected readonly isbnMatch = signal<Book | null>(null);
   protected readonly cardRead = signal(false);
   protected readonly form = signal<DraftForm>({ ...EMPTY_FORM });
@@ -151,6 +156,7 @@ export class AddBookPage {
       const result = await this.catalog.search(title, splitAuthors(this.authors()));
       this.matches.set(result.matches);
       this.editions.set(result.editions);
+      this.hiddenCovers.set(new Set());
       this.onlineFailed.set(result.onlineFailed);
       this.step.set(result.matches.length ? 'matches' : 'covers');
     });
@@ -165,6 +171,16 @@ export class AddBookPage {
   }
 
   // 3. Escolha da capa -----------------------------------------------------------
+
+  protected hideCover(edition: OnlineEdition) {
+    this.hiddenCovers.update((set) => new Set(set).add(edition.coverUrl));
+  }
+
+  /** Esconde imagens minúsculas, que são marcadores de "sem capa" dos catálogos. */
+  protected checkCover(event: Event, edition: OnlineEdition) {
+    const img = event.target as HTMLImageElement;
+    if (img.naturalWidth < 40 || img.naturalHeight < 40) this.hideCover(edition);
+  }
 
   protected chooseEdition(edition: OnlineEdition) {
     void this.withBusy('Baixando a capa...', async () => {
