@@ -10,8 +10,8 @@ fichas catalográficas.
 src/app/core       serviços (auth, estante, catálogo, social), cálculos e modelos
 src/app/shared     componentes reutilizáveis (capa, lista grade/lista, registro de página)
 src/app/pages      telas
-functions/         Cloud Functions: registerUser, identifyCover, readCatalogCard,
-                   respondInvite, removeConnection
+functions/         Cloud Functions: registerUser, identifyCover, searchBook, fetchCover,
+                   readCatalogCard, respondInvite, removeConnection
 firestore.rules    regras de segurança do Firestore
 storage.rules      regras do Storage (capas)
 ```
@@ -56,6 +56,11 @@ storage.rules      regras do Storage (capas)
 5. Configurar a chave da OpenAI como segredo:
    ```sh
    firebase functions:secrets:set OPENAI_API_KEY
+   ```
+   Para as capas, ative a **Books API** no Google Cloud Console (APIs e serviços > Biblioteca),
+   crie uma chave de API restrita a ela (APIs e serviços > Credenciais) e guarde como segredo:
+   ```sh
+   firebase functions:secrets:set GOOGLE_BOOKS_API_KEY
    ```
 6. Em Authentication > Configurações > Domínios autorizados, incluir o domínio de produção, se
    usar um domínio próprio.

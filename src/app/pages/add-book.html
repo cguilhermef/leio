@@ -1,17 +1,19 @@
 <div class="page">
   <div class="page-head">
-    @if (step() === 'cover') {
+    @if (step() === 'photo') {
       <a routerLink="/livros" class="icon-btn" aria-label="Voltar"><app-icon name="back" /></a>
     } @else {
-      <button type="button" class="icon-btn" aria-label="Recomeçar" (click)="restart()"><app-icon name="back" /></button>
+      <button type="button" class="icon-btn" aria-label="Voltar" (click)="back()" [disabled]="!!busy()">
+        <app-icon name="back" />
+      </button>
     }
     <h1>Adicionar livro</h1>
   </div>
 
   <ol class="steps" aria-label="Etapas">
-    <li [class.done]="step() !== 'cover'" [class.current]="step() === 'cover' || step() === 'matches'">Capa</li>
-    <li [class.done]="step() === 'form'" [class.current]="step() === 'card'">Ficha</li>
-    <li [class.current]="step() === 'form'">Dados</li>
+    <li [class.done]="stepIndex() > 0" [class.current]="stepIndex() === 0">Foto</li>
+    <li [class.done]="stepIndex() > 1" [class.current]="stepIndex() === 1">Livro e capa</li>
+    <li [class.current]="stepIndex() === 2">Dados</li>
   </ol>
 
   @if (busy()) {
@@ -21,22 +23,52 @@
     </div>
   } @else {
     @switch (step()) {
-      @case ('cover') {
+      @case ('photo') {
         <section class="card capture">
           <app-icon name="camera" [size]="40" />
           <h2>Fotografe a capa do livro</h2>
-          <p class="muted">Vamos identificar o título e o autor e procurar o livro no catálogo.</p>
+          <p class="muted">
+            Serve só para identificar o livro, então pode ser a capa impressa ou a tela do Kindle.
+            A capa colorida é buscada na internet.
+          </p>
           <label class="btn">
             <app-icon name="camera" [size]="18" /> Fotografar capa
-            <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onCover($event)" />
+            <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onPhoto($event)" />
           </label>
-          <button type="button" class="btn secondary" (click)="manual()">Preencher manualmente</button>
+          <button type="button" class="btn secondary" (click)="typeManually()">Digitar o título</button>
         </section>
+      }
+
+      @case ('confirm') {
+        <form class="card" (ngSubmit)="search()">
+          <div class="confirm-head">
+            @if (photo()) {
+              <img class="preview small-preview" [src]="photo()" alt="Foto da capa" />
+              <div>
+                <h2>É este livro?</h2>
+                <p class="muted small">Confira e corrija o título e o autor, se necessário.</p>
+              </div>
+            } @else {
+              <h2>Qual livro?</h2>
+            }
+          </div>
+          <label class="field">
+            <span>Título</span>
+            <input class="input" name="title" required [ngModel]="title()" (ngModelChange)="title.set($event)" />
+          </label>
+          <label class="field">
+            <span>Autor (separe vários por vírgula)</span>
+            <input class="input" name="authors" [ngModel]="authors()" (ngModelChange)="authors.set($event)" />
+          </label>
+          <div class="actions">
+            <button type="submit" class="btn block"><app-icon name="search" [size]="18" /> Buscar capa e dados</button>
+          </div>
+        </form>
       }
 
       @case ('matches') {
         <section>
-          <h2>É um destes?</h2>
+          <h2>Já está no Leio?</h2>
           <p class="muted">Encontramos livros parecidos no catálogo.</p>
           <ul class="list-plain">
             @for (book of matches(); track book.id) {
@@ -58,21 +90,30 @@
         </section>
       }
 
-      @case ('card') {
-        <section class="card capture">
-          @if (coverImage()) {
-            <img class="preview" [src]="coverImage()" alt="Capa fotografada" />
+      @case ('covers') {
+        <section>
+          <h2>Escolha a capa</h2>
+          @if (editions().length) {
+            <p class="muted">Toque na capa da sua edição. Os dados dela preenchem o cadastro.</p>
+            <ul class="covers">
+              @for (ed of editions(); track ed.coverUrl) {
+                <li>
+                  <button type="button" (click)="chooseEdition(ed)" [attr.aria-label]="'Escolher capa: ' + ed.title + (ed.publisher ? ', ' + ed.publisher : '')">
+                    <app-book-cover [url]="ed.coverUrl" [title]="ed.title" />
+                    <span class="cover-meta">{{ ed.publisher || ed.title }}{{ ed.year ? ', ' + ed.year : '' }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">Não encontramos capas online para este livro.</p>
           }
-          <h2>Agora, a ficha catalográfica</h2>
-          <p class="muted">
-            Este livro ainda não está no catálogo. Fotografe a ficha catalográfica, normalmente no
-            verso da folha de rosto, para preencher os dados.
-          </p>
-          <label class="btn">
-            <app-icon name="camera" [size]="18" /> Fotografar ficha
-            <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onCard($event)" />
-          </label>
-          <button type="button" class="btn secondary" (click)="manual()">Preencher manualmente</button>
+          <div class="actions">
+            @if (photo()) {
+              <button type="button" class="btn secondary" (click)="usePhoto()">Usar minha foto</button>
+            }
+            <button type="button" class="btn secondary" (click)="noCover()">Continuar sem capa</button>
+          </div>
         </section>
       }
 
@@ -88,10 +129,25 @@
           </div>
         }
 
+        <div class="card card-step">
+          @if (cardRead()) {
+            <p class="small"><app-icon name="check" [size]="16" /> Dados da ficha catalográfica aplicados.</p>
+          } @else {
+            <p class="small muted">
+              Opcional: fotografe a ficha catalográfica (no verso da folha de rosto, ou nas páginas
+              iniciais do ebook) para completar os dados da edição.
+            </p>
+            <label class="btn small secondary">
+              <app-icon name="camera" [size]="16" /> Fotografar ficha
+              <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onCard($event)" />
+            </label>
+          }
+        </div>
+
         <form class="details" (ngSubmit)="save('toread')">
           <div class="form-head">
             @if (coverImage()) {
-              <img class="preview small-preview" [src]="coverImage()" alt="Capa" />
+              <img class="preview small-preview" [src]="coverImage()" alt="Capa escolhida" />
             }
             <p class="muted small">Confira os dados antes de salvar.</p>
           </div>
@@ -109,7 +165,7 @@
           </label>
           <div class="row">
             <label class="field">
-              <span>Páginas</span>
+              <span>Páginas (do impresso)</span>
               <input class="input" name="pages" type="number" min="1" inputmode="numeric"
                 [ngModel]="form().pages" (ngModelChange)="update('pages', $event)" />
             </label>

@@ -1,6 +1,11 @@
-/** Lê uma imagem escolhida pelo usuário e a reduz para envio (JPEG em data URL). */
-export async function resizeImage(file: File, maxSize = 1280, quality = 0.85): Promise<string> {
-  const bitmap = await createImageBitmap(file);
+/** Reduz uma imagem (arquivo ou data URL) para envio, como JPEG em data URL. */
+export async function resizeImage(
+  source: Blob | string,
+  maxSize = 1280,
+  quality = 0.85,
+): Promise<string> {
+  const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+  const bitmap = await createImageBitmap(blob);
   const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
   const height = Math.round(bitmap.height * scale);

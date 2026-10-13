@@ -39,6 +39,8 @@ export interface ShelfEntry {
   maxPage: number;
   /** Total de páginas lidas deste livro, somando releituras. */
   pagesRead: number;
+  /** Total de posições do ebook (Kindle sem números de página), para converter posição em página. */
+  positions?: number;
   /** Quantidade de leituras concluídas. */
   reads: number;
   /** Datas (AAAA-MM-DD) em que cada leitura foi concluída. */

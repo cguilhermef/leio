@@ -12,6 +12,7 @@ const db = getFirestore();
 setGlobalOptions({ region: 'southamerica-east1', maxInstances: 5 });
 
 const OPENAI_API_KEY = defineSecret('OPENAI_API_KEY');
+const GOOGLE_BOOKS_API_KEY = defineSecret('GOOGLE_BOOKS_API_KEY');
 const OPENAI_MODEL = defineString('OPENAI_MODEL', { default: 'gpt-5-mini' });
 const MAX_USERS = defineInt('MAX_USERS', { default: 50 });
 const AI_DAILY_LIMIT = defineInt('AI_DAILY_LIMIT', { default: 40 });
@@ -204,7 +205,8 @@ const COVER_SCHEMA = {
   },
 };
 
-const COVER_PROMPT = `Esta é a foto da capa de um livro. Identifique o título, o subtítulo (se houver)
+const COVER_PROMPT = `Esta é a foto da capa de um livro, impressa ou na tela de um leitor digital como
+o Kindle (possivelmente em preto e branco). Identifique o título, o subtítulo (se houver)
 e os autores exatamente como aparecem na capa, com acentuação correta e capitalização normal
 (não tudo em maiúsculas). Ignore selos, frases promocionais, nomes de editora e de tradutores.
 Escreva os nomes dos autores na ordem natural (Nome Sobrenome). Se a imagem não for a capa de um
@@ -228,8 +230,147 @@ export const identifyCover = onCall({ secrets: [OPENAI_API_KEY], timeoutSeconds:
       'Não conseguimos identificar um livro nesta foto. Tente outra foto ou preencha manualmente.',
     );
   }
-  const matches = await findSimilarBooks(result.title, result.authors);
-  return { title: result.title, subtitle: result.subtitle, authors: result.authors, matches };
+  return { title: result.title, subtitle: result.subtitle, authors: result.authors };
+});
+
+// ---------------------------------------------------------------------------
+// Busca do livro: catálogo do Leio e capas online (Google Books, Open Library)
+// ---------------------------------------------------------------------------
+
+/** Edição encontrada online, com capa e dados para pré-preencher o cadastro. */
+interface OnlineEdition {
+  source: 'google' | 'openlibrary';
+  title: string;
+  subtitle: string;
+  authors: string[];
+  publisher: string;
+  year: number | null;
+  isbn: string;
+  pages: number;
+  coverUrl: string;
+}
+
+const COVER_HOSTS = ['books.google.com', 'books.googleusercontent.com', 'covers.openlibrary.org'];
+const MAX_COVER_BYTES = 3 * 1024 * 1024;
+
+function yearFrom(value: unknown): number | null {
+  const match = String(value ?? '').match(/\d{4}/);
+  return match ? Number(match[0]) : null;
+}
+
+async function fetchJson(url: string): Promise<any> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status} em ${new URL(url).host}`);
+  return response.json();
+}
+
+async function searchGoogleBooks(title: string, authors: string[]): Promise<OnlineEdition[]> {
+  const terms = [`intitle:${title}`, ...authors.slice(0, 1).map((a) => `inauthor:${a}`)];
+  const params = new URLSearchParams({
+    q: terms.join(' '),
+    maxResults: '20',
+    printType: 'books',
+    key: GOOGLE_BOOKS_API_KEY.value(),
+  });
+  const data = await fetchJson(`https://www.googleapis.com/books/v1/volumes?${params}`);
+  return ((data.items ?? []) as any[])
+    .map((item): OnlineEdition | null => {
+      const info = item.volumeInfo ?? {};
+      const links = info.imageLinks ?? {};
+      const image: string | undefined = links.large ?? links.medium ?? links.small ?? links.thumbnail;
+      if (!image) return null;
+      const ids = (info.industryIdentifiers ?? []) as { type: string; identifier: string }[];
+      const isbn = ids.find((i) => i.type === 'ISBN_13') ?? ids.find((i) => i.type === 'ISBN_10');
+      return {
+        source: 'google',
+        title: info.title ?? '',
+        subtitle: info.subtitle ?? '',
+        authors: info.authors ?? [],
+        publisher: info.publisher ?? '',
+        year: yearFrom(info.publishedDate),
+        isbn: isbn?.identifier ?? '',
+        pages: info.pageCount ?? 0,
+        coverUrl: image.replace(/^http:/, 'https:').replace('&edge=curl', ''),
+      };
+    })
+    .filter((e): e is OnlineEdition => e !== null);
+}
+
+async function searchOpenLibrary(title: string, authors: string[]): Promise<OnlineEdition[]> {
+  const params = new URLSearchParams({
+    title,
+    limit: '10',
+    fields: 'title,subtitle,author_name,publisher,first_publish_year,isbn,number_of_pages_median,cover_i',
+  });
+  if (authors[0]) params.set('author', authors[0]);
+  const data = await fetchJson(`https://openlibrary.org/search.json?${params}`);
+  return ((data.docs ?? []) as any[])
+    .filter((doc) => doc.cover_i)
+    .map((doc) => ({
+      source: 'openlibrary' as const,
+      title: doc.title ?? '',
+      subtitle: doc.subtitle ?? '',
+      authors: doc.author_name ?? [],
+      publisher: doc.publisher?.[0] ?? '',
+      year: doc.first_publish_year ?? null,
+      isbn: (doc.isbn ?? []).find((i: string) => i.length === 13) ?? doc.isbn?.[0] ?? '',
+      pages: doc.number_of_pages_median ?? 0,
+      coverUrl: `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`,
+    }));
+}
+
+/**
+ * Procura o livro confirmado pelo usuário: primeiro no catálogo do Leio e depois em
+ * catálogos online, para oferecer capas coloridas e dados da edição.
+ */
+export const searchBook = onCall({ secrets: [GOOGLE_BOOKS_API_KEY] }, async (request) => {
+  requireAllowed(request);
+  const { title, authors } = (request.data ?? {}) as { title?: string; authors?: string[] };
+  const cleanTitle = String(title ?? '').trim().slice(0, 200);
+  const cleanAuthors = (Array.isArray(authors) ? authors : []).map((a) => String(a).trim()).filter(Boolean);
+  if (!cleanTitle) throw new HttpsError('invalid-argument', 'Informe o título do livro.');
+
+  const [matches, google, openLibrary] = await Promise.all([
+    findSimilarBooks(cleanTitle, cleanAuthors),
+    searchGoogleBooks(cleanTitle, cleanAuthors).catch((error) => {
+      console.warn('Google Books', error);
+      return [] as OnlineEdition[];
+    }),
+    searchOpenLibrary(cleanTitle, cleanAuthors).catch((error) => {
+      console.warn('Open Library', error);
+      return [] as OnlineEdition[];
+    }),
+  ]);
+
+  // Google Books primeiro (melhor para edições brasileiras); Open Library completa.
+  const seen = new Set<string>();
+  const editions = [...google, ...openLibrary.slice(0, Math.max(0, 12 - google.length))]
+    .filter((e) => !seen.has(e.coverUrl) && seen.add(e.coverUrl))
+    .slice(0, 12);
+  return { matches, editions };
+});
+
+/** Baixa uma capa de um catálogo online permitido e devolve como data URL. */
+export const fetchCover = onCall(async (request) => {
+  requireAllowed(request);
+  const url = String((request.data as { url?: string })?.url ?? '');
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new HttpsError('invalid-argument', 'Endereço de capa inválido.');
+  }
+  if (parsed.protocol !== 'https:' || !COVER_HOSTS.includes(parsed.hostname)) {
+    throw new HttpsError('invalid-argument', 'Endereço de capa não permitido.');
+  }
+  const response = await fetch(parsed, { signal: AbortSignal.timeout(10_000) });
+  const type = response.headers.get('content-type') ?? '';
+  if (!response.ok || !type.startsWith('image/')) {
+    throw new HttpsError('unavailable', 'Não foi possível baixar a capa.');
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > MAX_COVER_BYTES) throw new HttpsError('invalid-argument', 'A capa é muito grande.');
+  return { image: `data:${type.split(';')[0]};base64,${bytes.toString('base64')}` };
 });
 
 const CARD_SCHEMA = {

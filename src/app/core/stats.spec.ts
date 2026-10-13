@@ -1,5 +1,5 @@
 import { ReadingLog, ShelfEntry } from './models';
-import { goalBooks, readingStats, totalPages, uniquePages, weekStart, weeklyPlan } from './stats';
+import { goalBooks, positionToPage, readingStats, totalPages, uniquePages, weekStart, weeklyPlan } from './stats';
 
 function entry(partial: Partial<ShelfEntry>): ShelfEntry {
   return {
@@ -66,5 +66,11 @@ describe('stats', () => {
   it('começa a semana na segunda-feira', () => {
     expect(weekStart(new Date(2026, 9, 13))).toBe('2026-10-12');
     expect(weekStart(new Date(2026, 9, 18))).toBe('2026-10-12');
+  });
+
+  it('converte posição do Kindle em página do impresso', () => {
+    expect(positionToPage(2500, 5000, 320)).toBe(160);
+    expect(positionToPage(5100, 5000, 320)).toBe(320);
+    expect(positionToPage(100, 0, 320)).toBe(0);
   });
 });

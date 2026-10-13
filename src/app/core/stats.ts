@@ -193,3 +193,13 @@ export function weekStart(today = new Date()): string {
 export function pagesSince(logs: ReadingLog[], fromDate: string): number {
   return logs.filter((l) => l.date >= fromDate).reduce((sum, l) => sum + l.pages, 0);
 }
+
+/**
+ * Converte a posição de um ebook sem números de página (Kindle) na página equivalente do
+ * livro impresso, por regra de três: posição / total de posições = página / total de páginas.
+ */
+export function positionToPage(position: number, positions: number, pages: number): number {
+  if (positions <= 0 || pages <= 0) return 0;
+  const ratio = Math.min(1, Math.max(0, position / positions));
+  return Math.round(ratio * pages);
+}

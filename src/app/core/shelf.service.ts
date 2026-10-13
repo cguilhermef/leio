@@ -145,7 +145,12 @@ export class ShelfService {
    * informada vira páginas lidas na data escolhida. Ao chegar na última página, o livro
    * é marcado como lido.
    */
-  async logPage(entry: ShelfEntry, page: number, date = isoDate()): Promise<{ finished: boolean }> {
+  async logPage(
+    entry: ShelfEntry,
+    page: number,
+    date = isoDate(),
+    positions?: number,
+  ): Promise<{ finished: boolean }> {
     const from = entry.status === 'reading' ? entry.currentPage : 0;
     const to = entry.pages > 0 ? Math.min(page, entry.pages) : page;
     if (to < from) {
@@ -161,6 +166,7 @@ export class ShelfService {
       pagesRead: entry.pagesRead + delta,
       updatedAt: Date.now(),
     };
+    if (positions && positions !== entry.positions) update.positions = positions;
     if (finished) {
       update.reads = entry.reads + 1;
       update.finishedDates = [...entry.finishedDates, date];

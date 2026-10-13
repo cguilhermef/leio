@@ -10,7 +10,24 @@ export interface CoverResult {
   title: string;
   subtitle: string;
   authors: string[];
+}
+
+/** Edição encontrada em catálogos online (Google Books, Open Library). */
+export interface OnlineEdition {
+  source: 'google' | 'openlibrary';
+  title: string;
+  subtitle: string;
+  authors: string[];
+  publisher: string;
+  year: number | null;
+  isbn: string;
+  pages: number;
+  coverUrl: string;
+}
+
+export interface SearchResult {
   matches: Book[];
+  editions: OnlineEdition[];
 }
 
 export interface CardResult {
@@ -22,9 +39,20 @@ export interface CardResult {
 export class CatalogService {
   private auth = inject(AuthService);
 
-  /** Lê a capa com a OpenAI e procura o livro no catálogo. */
+  /** Lê título e autores da foto da capa com a OpenAI. */
   identifyCover(image: string): Promise<CoverResult> {
     return callFunction<{ image: string }, CoverResult>('identifyCover', { image });
+  }
+
+  /** Procura o livro no catálogo do Leio e capas/edições online. */
+  search(title: string, authors: string[]): Promise<SearchResult> {
+    return callFunction<{ title: string; authors: string[] }, SearchResult>('searchBook', { title, authors });
+  }
+
+  /** Baixa uma capa online (via Cloud Function) como data URL. */
+  async fetchCover(url: string): Promise<string> {
+    const { image } = await callFunction<{ url: string }, { image: string }>('fetchCover', { url });
+    return image;
   }
 
   /** Lê a ficha catalográfica com a OpenAI. */
