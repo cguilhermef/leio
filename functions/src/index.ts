@@ -264,10 +264,46 @@ async function fetchJson(url: string): Promise<any> {
   return response.json();
 }
 
+/**
+ * Busca no Google Books em etapas, da consulta mais precisa para a mais ampla, até reunir
+ * edições suficientes. Os filtros intitle/inauthor usam aspas: sem elas, o Google aplica o
+ * filtro só à primeira palavra (em "O portador do fogo", apenas a "O").
+ */
 async function searchGoogleBooks(title: string, authors: string[]): Promise<OnlineEdition[]> {
-  const terms = [`intitle:${title}`, ...authors.slice(0, 1).map((a) => `inauthor:${a}`)];
+  const clean = (text: string) => text.replace(/"/g, '').trim();
+  const t = clean(title);
+  const a = authors[0] ? clean(authors[0]) : '';
+  const queries = [
+    a ? `intitle:"${t}" inauthor:"${a}"` : `intitle:"${t}"`,
+    a ? `"${t}" ${a}` : `"${t}"`,
+    a ? `${t} ${a}` : t,
+  ];
+
+  const found: OnlineEdition[] = [];
+  const seen = new Set<string>();
+  let failures = 0;
+  for (const q of queries) {
+    try {
+      for (const edition of await googleBooksQuery(q)) {
+        if (!seen.has(edition.coverUrl)) {
+          seen.add(edition.coverUrl);
+          found.push(edition);
+        }
+      }
+    } catch (error) {
+      failures++;
+      console.warn('Google Books', q, error);
+    }
+    if (found.length >= 6) break;
+  }
+  if (failures === queries.length) throw new Error('Google Books indisponível');
+  if (!found.length) console.info('Google Books sem resultados', { title, authors });
+  return found;
+}
+
+async function googleBooksQuery(q: string): Promise<OnlineEdition[]> {
   const params = new URLSearchParams({
-    q: terms.join(' '),
+    q,
     maxResults: '20',
     printType: 'books',
     key: GOOGLE_BOOKS_API_KEY.value(),
@@ -330,24 +366,29 @@ export const searchBook = onCall({ secrets: [GOOGLE_BOOKS_API_KEY] }, async (req
   const cleanAuthors = (Array.isArray(authors) ? authors : []).map((a) => String(a).trim()).filter(Boolean);
   if (!cleanTitle) throw new HttpsError('invalid-argument', 'Informe o título do livro.');
 
+  let failedSources = 0;
   const [matches, google, openLibrary] = await Promise.all([
     findSimilarBooks(cleanTitle, cleanAuthors),
     searchGoogleBooks(cleanTitle, cleanAuthors).catch((error) => {
+      failedSources++;
       console.warn('Google Books', error);
       return [] as OnlineEdition[];
     }),
     searchOpenLibrary(cleanTitle, cleanAuthors).catch((error) => {
+      failedSources++;
       console.warn('Open Library', error);
       return [] as OnlineEdition[];
     }),
   ]);
+  // Avisa o app quando a busca online falhou (e não apenas veio vazia), para sugerir nova tentativa.
+  const onlineFailed = failedSources === 2;
 
   // Google Books primeiro (melhor para edições brasileiras); Open Library completa.
   const seen = new Set<string>();
   const editions = [...google, ...openLibrary.slice(0, Math.max(0, 12 - google.length))]
     .filter((e) => !seen.has(e.coverUrl) && seen.add(e.coverUrl))
     .slice(0, 12);
-  return { matches, editions };
+  return { matches, editions, onlineFailed };
 });
 
 /** Baixa uma capa de um catálogo online permitido e devolve como data URL. */

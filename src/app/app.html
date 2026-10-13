@@ -13,6 +13,13 @@
   </header>
 }
 
+@if (updates.ready()) {
+  <div class="update-bar" role="status">
+    <span>Há uma nova versão do Leio.</span>
+    <button type="button" class="btn small" (click)="updates.apply()">Atualizar</button>
+  </div>
+}
+
 <main>
   @if (auth.state() === 'loading') {
     <div class="spinner" role="status" aria-label="Carregando"></div>

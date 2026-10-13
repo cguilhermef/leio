@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/cor
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from './core/auth.service';
 import { SocialService } from './core/social.service';
+import { UpdateService } from './core/update.service';
 import { Icon } from './shared/icon';
 
 @Component({
@@ -14,6 +15,7 @@ import { Icon } from './shared/icon';
 export class App {
   protected auth = inject(AuthService);
   protected social = inject(SocialService);
+  protected updates = inject(UpdateService);
   private router = inject(Router);
 
   protected readonly nav = [

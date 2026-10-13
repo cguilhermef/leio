@@ -22,7 +22,7 @@ import { BookCover } from '../shared/book-cover';
 import { Icon } from '../shared/icon';
 import { LogDialog } from '../shared/log-dialog';
 
-type DateAction = 'finish' | 'reread' | 'add-read';
+type DateAction = 'finish' | 'reread' | 'add-read' | 'edit-log';
 
 @Component({
   selector: 'app-book-detail',
@@ -130,10 +130,18 @@ export class BookDetailPage {
     void this.run(() => this.shelf.setStatus(entry, status));
   }
 
-  protected askDate(action: DateAction) {
+  /** Registro cuja data está sendo corrigida. */
+  private editingLog: ReadingLog | null = null;
+
+  protected askDate(action: DateAction, initial = isoDate()) {
     this.dateAction.set(action);
-    this.date.set(isoDate());
+    this.date.set(initial);
     this.dateDialog().nativeElement.showModal();
+  }
+
+  protected editLogDate(log: ReadingLog) {
+    this.editingLog = log;
+    this.askDate('edit-log', log.date);
   }
 
   protected async confirmDate() {
@@ -148,6 +156,10 @@ export class BookDetailPage {
       await this.run(() => this.shelf.finish(entry, date), 'Leitura concluída.');
     } else if (entry && action === 'reread') {
       await this.run(() => this.shelf.addReread(entry, date), 'Releitura registrada.');
+    } else if (entry && action === 'edit-log' && this.editingLog) {
+      const log = this.editingLog;
+      this.editingLog = null;
+      await this.run(() => this.shelf.changeLogDate(entry, log, date), 'Data atualizada.');
     }
   }
 

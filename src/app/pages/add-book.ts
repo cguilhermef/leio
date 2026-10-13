@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CatalogService, OnlineEdition } from '../core/catalog.service';
@@ -75,10 +83,12 @@ export class AddBookPage {
 
   protected readonly matches = signal<Book[]>([]);
   protected readonly editions = signal<OnlineEdition[]>([]);
+  protected readonly onlineFailed = signal(false);
   protected readonly isbnMatch = signal<Book | null>(null);
   protected readonly cardRead = signal(false);
   protected readonly form = signal<DraftForm>({ ...EMPTY_FORM });
   protected readonly finishedDate = signal(isoDate());
+  private readonly readDialog = viewChild<ElementRef<HTMLDialogElement>>('readDialog');
 
   protected readonly stepIndex = computed(() => {
     const step = this.step();
@@ -141,6 +151,7 @@ export class AddBookPage {
       const result = await this.catalog.search(title, splitAuthors(this.authors()));
       this.matches.set(result.matches);
       this.editions.set(result.editions);
+      this.onlineFailed.set(result.onlineFailed);
       this.step.set(result.matches.length ? 'matches' : 'covers');
     });
   }
@@ -166,6 +177,16 @@ export class AddBookPage {
   protected usePhoto() {
     this.coverImage.set(this.photo());
     this.fillForm(null);
+  }
+
+  /** Tira uma nova foto só para usar como capa (por exemplo, quando não há capa online). */
+  protected onCoverPhoto(event: Event) {
+    const file = this.fileFrom(event);
+    if (!file) return;
+    void this.withBusy('Preparando a capa...', async () => {
+      this.coverImage.set(await resizeImage(file, 900, 0.88));
+      this.fillForm(null);
+    });
   }
 
   protected noCover() {
@@ -224,6 +245,17 @@ export class AddBookPage {
     else if (step === 'covers') this.step.set(this.matches().length ? 'matches' : 'confirm');
     else if (step === 'matches') this.step.set('confirm');
     else this.step.set('photo');
+  }
+
+  /** "Lido" pede a data de conclusão antes de salvar. */
+  protected askFinishedDate() {
+    this.finishedDate.set(isoDate());
+    this.readDialog()?.nativeElement.showModal();
+  }
+
+  protected confirmFinishedDate() {
+    this.readDialog()?.nativeElement.close();
+    this.save('read');
   }
 
   protected save(status: ShelfStatus) {

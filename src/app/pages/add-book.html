@@ -105,13 +105,31 @@
                 </li>
               }
             </ul>
+          } @else if (onlineFailed()) {
+            <p class="muted">A busca online não respondeu agora. Tente novamente em instantes.</p>
           } @else {
-            <p class="muted">Não encontramos capas online para este livro.</p>
+            <p class="muted">
+              Não encontramos capas online para "{{ title() }}". Tente buscar de novo, corrigir o
+              título ou usar uma foto como capa.
+            </p>
           }
           <div class="actions">
+            <button type="button" class="btn secondary" (click)="search()">
+              <app-icon name="repeat" [size]="16" /> Buscar novamente
+            </button>
+            <button type="button" class="btn secondary" (click)="step.set('confirm')">
+              <app-icon name="edit" [size]="16" /> Corrigir título
+            </button>
+          </div>
+          <p class="save-label">Ou, sem capa online:</p>
+          <div class="actions other-cover">
             @if (photo()) {
-              <button type="button" class="btn secondary" (click)="usePhoto()">Usar minha foto</button>
+              <button type="button" class="btn secondary" (click)="usePhoto()">Usar a foto que tirei</button>
             }
+            <label class="btn secondary">
+              <app-icon name="camera" [size]="16" /> Tirar nova foto para a capa
+              <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onCoverPhoto($event)" />
+            </label>
             <button type="button" class="btn secondary" (click)="noCover()">Continuar sem capa</button>
           </div>
         </section>
@@ -198,9 +216,7 @@
           <div class="actions save">
             <button type="submit" class="btn">Lerei</button>
             <button type="button" class="btn secondary" (click)="save('reading')">Lendo</button>
-            <button type="button" class="btn secondary" (click)="save('read')">Lido em</button>
-            <input class="input date" type="date" name="finishedDate" aria-label="Data de conclusão"
-              [max]="today" [ngModel]="finishedDate()" (ngModelChange)="finishedDate.set($event)" />
+            <button type="button" class="btn secondary" (click)="askFinishedDate()">Lido</button>
           </div>
         </form>
       }
@@ -211,3 +227,19 @@
     }
   }
 </div>
+
+<dialog #readDialog class="sheet">
+  <form (ngSubmit)="confirmFinishedDate()">
+    <h2>Quando você terminou a leitura?</h2>
+    <label class="field">
+      <span>Data de conclusão</span>
+      <input class="input" type="date" name="finishedDate" required [max]="today"
+        [ngModel]="finishedDate()" (ngModelChange)="finishedDate.set($event)" />
+    </label>
+    <p class="muted small">Se não lembrar o dia exato, uma data aproximada já ajuda nas estatísticas.</p>
+    <div class="actions">
+      <button type="submit" class="btn">Salvar como lido</button>
+      <button type="button" class="btn secondary" (click)="readDialog.close()">Cancelar</button>
+    </div>
+  </form>
+</dialog>

@@ -28,6 +28,8 @@ export interface OnlineEdition {
 export interface SearchResult {
   matches: Book[];
   editions: OnlineEdition[];
+  /** As fontes online falharam (erro ou indisponibilidade), em vez de não terem resultados. */
+  onlineFailed: boolean;
 }
 
 export interface CardResult {

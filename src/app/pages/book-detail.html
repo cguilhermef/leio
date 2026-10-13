@@ -119,6 +119,10 @@
               <li>
                 <span class="date">{{ fmtDate(log.date) }}</span>
                 <span class="grow">{{ logLabel(log) }}</span>
+                <button type="button" class="icon-btn" aria-label="Alterar data" title="Alterar data"
+                  (click)="editLogDate(log)" [disabled]="busy()">
+                  <app-icon name="edit" [size]="18" />
+                </button>
                 <button type="button" class="icon-btn" aria-label="Apagar registro" title="Apagar registro"
                   (click)="deleteLog(e, log)" [disabled]="busy()">
                   <app-icon name="trash" [size]="18" />
@@ -152,11 +156,12 @@
     <h2>
       @switch (dateAction()) {
         @case ('reread') { Quando você terminou esta releitura? }
+        @case ('edit-log') { Alterar a data do registro }
         @default { Quando você terminou a leitura? }
       }
     </h2>
     <label class="field">
-      <span>Data de conclusão</span>
+      <span>{{ dateAction() === 'edit-log' ? 'Data' : 'Data de conclusão' }}</span>
       <input class="input" type="date" name="date" required [max]="today" [(ngModel)]="date" />
     </label>
     <div class="actions">

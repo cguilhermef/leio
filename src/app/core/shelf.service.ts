@@ -275,6 +275,20 @@ export class ShelfService {
     await batch.commit();
   }
 
+  /** Corrige a data de um registro; em conclusões, ajusta também a data da leitura. */
+  async changeLogDate(entry: ShelfEntry, log: ReadingLog, date: string): Promise<void> {
+    if (date === log.date) return;
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'users', this.uid, 'logs', log.id!), { date });
+    if (log.kind !== 'progress') {
+      const dates = [...entry.finishedDates];
+      const index = dates.lastIndexOf(log.date);
+      if (index >= 0) dates[index] = date;
+      batch.update(this.entryRef(entry.bookId), { finishedDates: dates.sort(), updatedAt: Date.now() });
+    }
+    await batch.commit();
+  }
+
   async saveGoal(books: number): Promise<void> {
     const year = new Date().getFullYear();
     await setDoc(doc(db, 'users', this.uid, 'goals', String(year)), { books }, { merge: true });
