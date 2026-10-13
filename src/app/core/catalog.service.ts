@@ -3,7 +3,7 @@ import { collection, doc, getDoc, serverTimestamp, setDoc } from 'firebase/fires
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { AuthService } from './auth.service';
 import { callFunction, db, storage } from './firebase';
-import { Book, BookDraft } from './models';
+import { Book, BookChanges, BookDraft } from './models';
 import { normalize } from './text';
 
 export interface CoverResult {
@@ -37,6 +37,14 @@ export interface CardResult {
   match: Book | null;
 }
 
+export interface AuthorResult {
+  /** Livros do autor que já estão no catálogo do Leio. */
+  matches: Book[];
+  /** Obras encontradas online, uma por título (a capa pode faltar). */
+  works: OnlineEdition[];
+  onlineFailed: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class CatalogService {
   private auth = inject(AuthService);
@@ -60,6 +68,27 @@ export class CatalogService {
   /** Lê a ficha catalográfica com a OpenAI. */
   readCatalogCard(image: string): Promise<CardResult> {
     return callFunction<{ image: string }, CardResult>('readCatalogCard', { image });
+  }
+
+  /** Lista as obras de um autor, no catálogo do Leio e online. */
+  searchAuthor(author: string): Promise<AuthorResult> {
+    return callFunction<{ author: string }, AuthorResult>('searchAuthor', { author });
+  }
+
+  /**
+   * Edita o livro: para editores vale na hora (`applied`); para os demais vira uma sugestão
+   * que aguarda aprovação. A nova capa, se houver, é enviada antes para o Storage.
+   */
+  async edit(bookId: string, changes: BookChanges, coverDataUrl?: string): Promise<{ applied: boolean }> {
+    let coverPath: string | undefined;
+    if (coverDataUrl) {
+      coverPath = `covers/${bookId}-${Date.now()}.jpg`;
+      await uploadString(ref(storage, coverPath), coverDataUrl, 'data_url', { contentType: 'image/jpeg' });
+    }
+    return callFunction<{ bookId: string; changes: BookChanges; coverPath?: string }, { applied: boolean }>(
+      'editBook',
+      { bookId, changes, coverPath },
+    );
   }
 
   async get(bookId: string): Promise<Book | null> {

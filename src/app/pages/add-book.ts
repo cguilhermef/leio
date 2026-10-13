@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { BookForm, EMPTY_BOOK_FORM, draftFromForm, mergeCatalogCard, splitAuthors } from '../core/book-form';
 import { CatalogService, OnlineEdition } from '../core/catalog.service';
 import { errorMessage } from '../core/firebase';
 import { resizeImage } from '../core/image';
@@ -16,47 +17,20 @@ import { Book, ShelfStatus } from '../core/models';
 import { ShelfService } from '../core/shelf.service';
 import { authorsLabel, isoDate } from '../core/text';
 import { BookCover } from '../shared/book-cover';
+import { BookFields } from '../shared/book-fields';
 import { Icon } from '../shared/icon';
 
 /**
  * Etapas do cadastro:
  * photo -> confirm (nome identificado) -> matches (já no catálogo) -> covers (capa online) -> form.
+ * Buscando só pelo autor, confirm -> works (livros do autor) e, escolhida a obra, segue para matches.
  */
-type Step = 'photo' | 'confirm' | 'matches' | 'covers' | 'form';
-
-interface DraftForm {
-  title: string;
-  subtitle: string;
-  authors: string;
-  publisher: string;
-  year: number | null;
-  isbn: string;
-  pages: number | null;
-  edition: string;
-}
-
-const EMPTY_FORM: DraftForm = {
-  title: '',
-  subtitle: '',
-  authors: '',
-  publisher: '',
-  year: null,
-  isbn: '',
-  pages: null,
-  edition: '',
-};
-
-function splitAuthors(value: string): string[] {
-  return value
-    .split(/[,;]/)
-    .map((a) => a.trim())
-    .filter(Boolean);
-}
+type Step = 'photo' | 'confirm' | 'works' | 'matches' | 'covers' | 'form';
 
 @Component({
   selector: 'app-add-book',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, BookCover, Icon],
+  imports: [FormsModule, RouterLink, BookCover, BookFields, Icon],
   templateUrl: './add-book.html',
   styleUrl: './add-book.scss',
 })
@@ -82,6 +56,10 @@ export class AddBookPage {
   private subtitle = '';
 
   protected readonly matches = signal<Book[]>([]);
+  /** Busca só pelo autor: livros dele no catálogo e obras encontradas online. */
+  protected readonly authorBooks = signal<Book[]>([]);
+  protected readonly works = signal<OnlineEdition[]>([]);
+  protected readonly searchedAuthor = signal('');
   protected readonly editions = signal<OnlineEdition[]>([]);
   protected readonly onlineFailed = signal(false);
   /** Capas que não carregaram ou são apenas o aviso de "imagem indisponível". */
@@ -91,7 +69,7 @@ export class AddBookPage {
   );
   protected readonly isbnMatch = signal<Book | null>(null);
   protected readonly cardRead = signal(false);
-  protected readonly form = signal<DraftForm>({ ...EMPTY_FORM });
+  protected readonly form = signal<BookForm>({ ...EMPTY_BOOK_FORM });
   protected readonly finishedDate = signal(isoDate());
   private readonly readDialog = viewChild<ElementRef<HTMLDialogElement>>('readDialog');
 
@@ -145,6 +123,35 @@ export class AddBookPage {
   }
 
   // 2. Confirmação do nome e busca --------------------------------------------------
+
+  /** Com título, procura o livro; só com o autor, lista os livros dele. */
+  protected submitSearch() {
+    this.searchedAuthor.set('');
+    if (this.title().trim()) {
+      this.search();
+      return;
+    }
+    const author = this.authors().trim();
+    if (!author) {
+      this.error.set('Informe o título ou o autor do livro.');
+      return;
+    }
+    void this.withBusy('Procurando livros do autor...', async () => {
+      const result = await this.catalog.searchAuthor(author);
+      this.searchedAuthor.set(author);
+      this.authorBooks.set(result.matches);
+      this.works.set(result.works);
+      this.onlineFailed.set(result.onlineFailed);
+      this.step.set('works');
+    });
+  }
+
+  protected chooseWork(work: OnlineEdition) {
+    this.title.set(work.title);
+    this.subtitle = work.subtitle;
+    this.authors.set(work.authors.join(', '));
+    this.search();
+  }
 
   protected search() {
     const title = this.title().trim();
@@ -234,32 +241,21 @@ export class AddBookPage {
     void this.withBusy('Lendo a ficha catalográfica...', async () => {
       const image = await resizeImage(file, 1600, 0.9);
       const { draft, match } = await this.catalog.readCatalogCard(image);
-      // Os dados da ficha descrevem a edição exata e prevalecem sobre a busca online.
-      this.form.update((f) => ({
-        title: draft.title || f.title,
-        subtitle: draft.subtitle || f.subtitle,
-        authors: draft.authors.length ? draft.authors.join(', ') : f.authors,
-        publisher: draft.publisher || f.publisher,
-        year: draft.year || f.year,
-        isbn: draft.isbn || f.isbn,
-        pages: draft.pages || f.pages,
-        edition: draft.edition || f.edition,
-      }));
+      this.form.update((f) => mergeCatalogCard(f, draft));
       this.isbnMatch.set(match);
       this.cardRead.set(true);
     });
   }
 
-  protected update<K extends keyof DraftForm>(key: K, value: DraftForm[K]) {
-    this.form.update((f) => ({ ...f, [key]: value }));
-  }
-
   protected back() {
     const step = this.step();
+    // Quem chegou pela busca por autor volta para a lista de livros dele.
+    const searchStep: Step = this.searchedAuthor() ? 'works' : 'confirm';
     this.error.set('');
-    if (step === 'form') this.step.set(this.editions().length || this.photo() ? 'covers' : 'confirm');
-    else if (step === 'covers') this.step.set(this.matches().length ? 'matches' : 'confirm');
-    else if (step === 'matches') this.step.set('confirm');
+    if (step === 'form') this.step.set(this.editions().length || this.photo() ? 'covers' : searchStep);
+    else if (step === 'covers') this.step.set(this.matches().length ? 'matches' : searchStep);
+    else if (step === 'matches') this.step.set(searchStep);
+    else if (step === 'works') this.step.set('confirm');
     else this.step.set('photo');
   }
 
@@ -275,25 +271,13 @@ export class AddBookPage {
   }
 
   protected save(status: ShelfStatus) {
-    const f = this.form();
-    if (!f.title.trim()) {
+    const draft = draftFromForm(this.form());
+    if (!draft.title) {
       this.error.set('Informe o título do livro.');
       return;
     }
     void this.withBusy('Salvando...', async () => {
-      const book = await this.catalog.create(
-        {
-          title: f.title,
-          subtitle: f.subtitle,
-          authors: splitAuthors(f.authors),
-          publisher: f.publisher,
-          year: f.year ? Number(f.year) : null,
-          isbn: f.isbn,
-          pages: Number(f.pages) || 0,
-          edition: f.edition,
-        },
-        this.coverImage() || undefined,
-      );
+      const book = await this.catalog.create(draft, this.coverImage() || undefined);
       await this.shelf.add(book, status, this.finishedDate());
       void this.router.navigate(['/livro', book.id]);
     });

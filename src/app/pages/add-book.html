@@ -40,7 +40,7 @@
       }
 
       @case ('confirm') {
-        <form class="card" (ngSubmit)="search()">
+        <form class="card" (ngSubmit)="submitSearch()">
           <div class="confirm-head">
             @if (photo()) {
               <img class="preview small-preview" [src]="photo()" alt="Foto da capa" />
@@ -54,16 +54,66 @@
           </div>
           <label class="field">
             <span>Título</span>
-            <input class="input" name="title" required [ngModel]="title()" (ngModelChange)="title.set($event)" />
+            <input class="input" name="title" [ngModel]="title()" (ngModelChange)="title.set($event)" />
           </label>
           <label class="field">
             <span>Autor (separe vários por vírgula)</span>
             <input class="input" name="authors" [ngModel]="authors()" (ngModelChange)="authors.set($event)" />
           </label>
+          <p class="muted small">Sabe só o autor? Deixe o título em branco para ver os livros dele.</p>
           <div class="actions">
-            <button type="submit" class="btn block"><app-icon name="search" [size]="18" /> Buscar capa e dados</button>
+            <button type="submit" class="btn block">
+              <app-icon name="search" [size]="18" />
+              {{ title().trim() || !authors().trim() ? 'Buscar capa e dados' : 'Buscar livros do autor' }}
+            </button>
           </div>
         </form>
+      }
+
+      @case ('works') {
+        <section>
+          <h2>Livros de {{ searchedAuthor() }}</h2>
+          @if (authorBooks().length) {
+            <p class="muted">Já estão no Leio:</p>
+            <ul class="list-plain">
+              @for (book of authorBooks(); track book.id) {
+                <li>
+                  <app-book-cover class="thumb" [url]="book.coverUrl" [title]="book.title" />
+                  <span class="grow">
+                    <strong>{{ book.title }}</strong><br />
+                    <span class="muted small">
+                      {{ authorsLabel(book.authors) }}{{ book.publisher ? ' - ' + book.publisher : '' }}{{ book.year ? ', ' + book.year : '' }}
+                    </span>
+                  </span>
+                  <button type="button" class="btn small" (click)="choose(book)">É este</button>
+                </li>
+              }
+            </ul>
+          }
+          @if (works().length) {
+            <p class="muted">{{ authorBooks().length ? 'Outros livros encontrados online:' : 'Toque no livro que você quer adicionar.' }}</p>
+            <ul class="covers">
+              @for (work of works(); track $index) {
+                <li>
+                  <button type="button" (click)="chooseWork(work)" [attr.aria-label]="'Escolher ' + work.title">
+                    <app-book-cover [url]="work.coverUrl" [title]="work.title" />
+                    <span class="cover-title">{{ work.title }}</span>
+                    <span class="cover-meta">{{ authorsLabel(work.authors) }}{{ work.year ? ', ' + work.year : '' }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          } @else if (onlineFailed()) {
+            <p class="muted">A busca online não respondeu agora. Tente novamente em instantes.</p>
+          } @else if (!authorBooks().length) {
+            <p class="muted">Não encontramos livros de "{{ searchedAuthor() }}". Confira o nome ou busque pelo título.</p>
+          }
+          <div class="actions">
+            <button type="button" class="btn secondary" (click)="step.set('confirm')">
+              <app-icon name="edit" [size]="16" /> Buscar pelo título
+            </button>
+          </div>
+        </section>
       }
 
       @case ('matches') {
@@ -171,44 +221,7 @@
             }
             <p class="muted small">Confira os dados antes de salvar.</p>
           </div>
-          <label class="field">
-            <span>Título</span>
-            <input class="input" name="title" required [ngModel]="form().title" (ngModelChange)="update('title', $event)" />
-          </label>
-          <label class="field">
-            <span>Subtítulo</span>
-            <input class="input" name="subtitle" [ngModel]="form().subtitle" (ngModelChange)="update('subtitle', $event)" />
-          </label>
-          <label class="field">
-            <span>Autores (separados por vírgula)</span>
-            <input class="input" name="authors" [ngModel]="form().authors" (ngModelChange)="update('authors', $event)" />
-          </label>
-          <div class="row">
-            <label class="field">
-              <span>Páginas (do impresso)</span>
-              <input class="input" name="pages" type="number" min="1" inputmode="numeric"
-                [ngModel]="form().pages" (ngModelChange)="update('pages', $event)" />
-            </label>
-            <label class="field">
-              <span>Ano</span>
-              <input class="input" name="year" type="number" inputmode="numeric"
-                [ngModel]="form().year" (ngModelChange)="update('year', $event)" />
-            </label>
-          </div>
-          <label class="field">
-            <span>Editora</span>
-            <input class="input" name="publisher" [ngModel]="form().publisher" (ngModelChange)="update('publisher', $event)" />
-          </label>
-          <div class="row">
-            <label class="field">
-              <span>ISBN</span>
-              <input class="input" name="isbn" inputmode="numeric" [ngModel]="form().isbn" (ngModelChange)="update('isbn', $event)" />
-            </label>
-            <label class="field">
-              <span>Edição</span>
-              <input class="input" name="edition" [ngModel]="form().edition" (ngModelChange)="update('edition', $event)" />
-            </label>
-          </div>
+          <app-book-fields [(value)]="form" />
 
           @if (error()) {
             <p class="error">{{ error() }}</p>

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from './core/auth.service';
+import { EditsService } from './core/edits.service';
 import { SocialService } from './core/social.service';
 import { UpdateService } from './core/update.service';
 import { Icon } from './shared/icon';
@@ -16,7 +17,11 @@ export class App {
   protected auth = inject(AuthService);
   protected social = inject(SocialService);
   protected updates = inject(UpdateService);
+  private edits = inject(EditsService);
   private router = inject(Router);
+
+  /** Convites e indicações não vistos, mais sugestões de edição aguardando um editor. */
+  protected readonly badge = computed(() => this.social.unseenCount() + this.edits.pending().length);
 
   protected readonly nav = [
     { path: '/', icon: 'home', label: 'Início', exact: true },

@@ -20,11 +20,24 @@ function words(text: string): string[] {
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
 
-/** Palavras iguais, ou uma prefixo da outra (tolera "Bernar" x "Bernard", plurais). */
+/** Verdadeiro se as palavras diferem em no máximo uma letra (inserida, removida ou trocada). */
+function oneEditApart(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/**
+ * Palavras iguais, uma prefixo da outra (tolera "Bernar" x "Bernard", plurais) ou com um
+ * erro de digitação ("inteligence" x "intelligence").
+ */
 function sameWord(a: string, b: string): boolean {
   if (a === b) return true;
   const [short, long] = a.length < b.length ? [a, b] : [b, a];
-  return short.length >= 4 && long.startsWith(short);
+  if (short.length >= 4 && long.startsWith(short)) return true;
+  return short.length >= 5 && oneEditApart(a, b);
 }
 
 /** Fração das palavras buscadas que aparecem no texto encontrado. */
@@ -50,6 +63,16 @@ export function score<T extends Rankable>(item: T, title: string, authors: strin
   const queryAuthors = words(authors.join(' '));
   const authorScore = queryAuthors.length ? coverage(queryAuthors, words(item.authors.join(' '))) : 1;
   return { item, titleScore, authorScore };
+}
+
+/** Verdadeiro se todas as palavras do autor buscado aparecem entre os autores encontrados. */
+export function matchesAuthor(authors: string[], author: string): boolean {
+  return coverage(words(author), words(authors.join(' '))) === 1;
+}
+
+/** Título sem subtítulo, normalizado, para reconhecer edições da mesma obra. */
+export function workKey(title: string): string {
+  return words(title.split(/[:(]/)[0]).join(' ');
 }
 
 /**

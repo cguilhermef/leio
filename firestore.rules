@@ -20,6 +20,12 @@ service cloud.firestore {
       return allowed() && uid in myConnections();
     }
 
+    // Editores do catálogo (meta/roles.editors), definidos pelo console do Firebase.
+    function isEditor() {
+      return allowed()
+        && request.auth.uid in get(/databases/$(database)/documents/meta/roles).data.editors;
+    }
+
     function onlyChanges(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
@@ -55,8 +61,16 @@ service cloud.firestore {
         && request.resource.data.pages is int
         && request.resource.data.pages >= 0
         && request.resource.data.pages < 20000;
-      allow update: if allowed() && resource.data.createdBy == request.auth.uid
-        && request.resource.data.createdBy == resource.data.createdBy;
+      // Edições passam pela função editBook (direto para editores, por sugestão para os demais).
+    }
+
+    match /bookEdits/{editId} {
+      // Criadas e revisadas pelas funções editBook e reviewBookEdit.
+      allow read: if allowed() && (resource.data.fromUid == request.auth.uid || isEditor());
+    }
+
+    match /meta/roles {
+      allow read: if allowed();
     }
 
     match /invites/{inviteId} {

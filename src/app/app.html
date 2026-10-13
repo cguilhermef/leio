@@ -3,8 +3,8 @@
     <a routerLink="/" class="brand">Leio</a>
     <a routerLink="/notificacoes" class="icon-btn" aria-label="Notificações" title="Notificações">
       <app-icon name="bell" />
-      @if (social.unseenCount()) {
-        <span class="badge">{{ social.unseenCount() }}</span>
+      @if (badge()) {
+        <span class="badge">{{ badge() }}</span>
       }
     </a>
     <button type="button" class="icon-btn" (click)="auth.signOut()" aria-label="Sair" title="Sair">

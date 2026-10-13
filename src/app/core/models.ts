@@ -105,3 +105,25 @@ export interface Recommendation {
   seen: boolean;
   createdAt: number;
 }
+
+/** Campos do livro que podem ser editados. */
+export type BookChanges = Partial<
+  Pick<Book, 'title' | 'subtitle' | 'authors' | 'publisher' | 'year' | 'isbn' | 'pages' | 'edition' | 'coverUrl'>
+>;
+
+export type BookEditStatus = 'pending' | 'approved' | 'rejected';
+
+/** Sugestão de edição de um livro, revisada por um editor (`bookEdits/{id}`). */
+export interface BookEdit {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  fromUid: string;
+  fromName: string;
+  /** Novos valores, apenas dos campos alterados. */
+  changes: BookChanges;
+  /** Valores do livro quando a sugestão foi feita. */
+  before: BookChanges;
+  status: BookEditStatus;
+  createdAt: number;
+}

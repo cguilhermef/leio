@@ -1,11 +1,12 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { getDownloadURL, getStorage } from 'firebase-admin/storage';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { defineInt, defineSecret, defineString } from 'firebase-functions/params';
 import OpenAI from 'openai';
-import { rankEditions } from './ranking';
+import { matchesAuthor, rankEditions, workKey } from './ranking';
 
 initializeApp();
 const db = getFirestore();
@@ -111,6 +112,7 @@ interface BookDoc {
   year?: number | null;
   isbn?: string;
   pages: number;
+  edition?: string;
   coverUrl?: string;
   titleKey: string;
 }
@@ -259,10 +261,15 @@ function yearFrom(value: unknown): number | null {
   return match ? Number(match[0]) : null;
 }
 
+/** Busca JSON, tentando de novo uma vez quando o serviço falha temporariamente (5xx, 429). */
 async function fetchJson(url: string): Promise<any> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`HTTP ${response.status} em ${new URL(url).host}`);
-  return response.json();
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (response.ok) return response.json();
+    const transient = response.status >= 500 || response.status === 429;
+    if (!transient || attempt === 2) throw new Error(`HTTP ${response.status} em ${new URL(url).host}`);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
 }
 
 /**
@@ -303,10 +310,14 @@ async function searchGoogleBooks(title: string, authors: string[]): Promise<Onli
   return found;
 }
 
-async function googleBooksQuery(q: string): Promise<OnlineEdition[]> {
+/** Consulta o Google Books. Sem `withoutCover`, descarta volumes sem imagem de capa. */
+async function googleBooksQuery(
+  q: string,
+  { maxResults = 20, withoutCover = false } = {},
+): Promise<OnlineEdition[]> {
   const params = new URLSearchParams({
     q,
-    maxResults: '20',
+    maxResults: String(maxResults),
     printType: 'books',
     key: GOOGLE_BOOKS_API_KEY.value(),
   });
@@ -316,7 +327,7 @@ async function googleBooksQuery(q: string): Promise<OnlineEdition[]> {
       const info = item.volumeInfo ?? {};
       const links = info.imageLinks ?? {};
       const image: string | undefined = links.large ?? links.medium ?? links.small ?? links.thumbnail;
-      if (!image) return null;
+      if (!image && !withoutCover) return null;
       const ids = (info.industryIdentifiers ?? []) as { type: string; identifier: string }[];
       const isbn = ids.find((i) => i.type === 'ISBN_13') ?? ids.find((i) => i.type === 'ISBN_10');
       return {
@@ -328,33 +339,34 @@ async function googleBooksQuery(q: string): Promise<OnlineEdition[]> {
         year: yearFrom(info.publishedDate),
         isbn: isbn?.identifier ?? '',
         pages: info.pageCount ?? 0,
-        coverUrl: image.replace(/^http:/, 'https:').replace('&edge=curl', ''),
+        coverUrl: image ? image.replace(/^http:/, 'https:').replace('&edge=curl', '') : '',
       };
     })
     .filter((e): e is OnlineEdition => e !== null);
 }
 
+const OPEN_LIBRARY_FIELDS =
+  'title,subtitle,author_name,publisher,first_publish_year,isbn,number_of_pages_median,cover_i';
+
+function openLibraryEdition(doc: any): OnlineEdition {
+  return {
+    source: 'openlibrary',
+    title: doc.title ?? '',
+    subtitle: doc.subtitle ?? '',
+    authors: doc.author_name ?? [],
+    publisher: doc.publisher?.[0] ?? '',
+    year: doc.first_publish_year ?? null,
+    isbn: (doc.isbn ?? []).find((i: string) => i.length === 13) ?? doc.isbn?.[0] ?? '',
+    pages: doc.number_of_pages_median ?? 0,
+    coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : '',
+  };
+}
+
 async function searchOpenLibrary(title: string, authors: string[]): Promise<OnlineEdition[]> {
-  const params = new URLSearchParams({
-    title,
-    limit: '10',
-    fields: 'title,subtitle,author_name,publisher,first_publish_year,isbn,number_of_pages_median,cover_i',
-  });
+  const params = new URLSearchParams({ title, limit: '10', fields: OPEN_LIBRARY_FIELDS });
   if (authors[0]) params.set('author', authors[0]);
   const data = await fetchJson(`https://openlibrary.org/search.json?${params}`);
-  return ((data.docs ?? []) as any[])
-    .filter((doc) => doc.cover_i)
-    .map((doc) => ({
-      source: 'openlibrary' as const,
-      title: doc.title ?? '',
-      subtitle: doc.subtitle ?? '',
-      authors: doc.author_name ?? [],
-      publisher: doc.publisher?.[0] ?? '',
-      year: doc.first_publish_year ?? null,
-      isbn: (doc.isbn ?? []).find((i: string) => i.length === 13) ?? doc.isbn?.[0] ?? '',
-      pages: doc.number_of_pages_median ?? 0,
-      coverUrl: `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`,
-    }));
+  return ((data.docs ?? []) as any[]).filter((doc) => doc.cover_i).map(openLibraryEdition);
 }
 
 /**
@@ -391,6 +403,63 @@ export const searchBook = onCall({ secrets: [GOOGLE_BOOKS_API_KEY] }, async (req
     .filter((e) => !seen.has(e.coverUrl) && seen.add(e.coverUrl))
     .slice(0, 12);
   return { matches, editions, onlineFailed };
+});
+
+/** Livros do catálogo do Leio com o autor buscado (o catálogo é pequeno o bastante para varrer). */
+async function findBooksByAuthor(author: string) {
+  const snap = await db
+    .collection('books')
+    .select('title', 'subtitle', 'authors', 'publisher', 'year', 'isbn', 'pages', 'coverUrl', 'titleKey')
+    .limit(3000)
+    .get();
+  return snap.docs
+    .map((doc) => ({ ...(doc.data() as BookDoc), id: doc.id }))
+    .filter((book) => matchesAuthor(book.authors ?? [], author))
+    .sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'))
+    .slice(0, 30);
+}
+
+async function searchOpenLibraryByAuthor(author: string): Promise<OnlineEdition[]> {
+  const params = new URLSearchParams({ author, sort: 'editions', limit: '40', fields: OPEN_LIBRARY_FIELDS });
+  const data = await fetchJson(`https://openlibrary.org/search.json?${params}`);
+  return ((data.docs ?? []) as any[]).map(openLibraryEdition);
+}
+
+/**
+ * Lista as obras de um autor: as que já estão no catálogo do Leio e, uma por obra, as
+ * encontradas online (preferindo a edição com capa).
+ */
+export const searchAuthor = onCall({ secrets: [GOOGLE_BOOKS_API_KEY] }, async (request) => {
+  requireAllowed(request);
+  const author = String((request.data as { author?: string })?.author ?? '').trim().slice(0, 120);
+  if (!author) throw new HttpsError('invalid-argument', 'Informe o nome do autor.');
+
+  let failedSources = 0;
+  const [matches, google, openLibrary] = await Promise.all([
+    findBooksByAuthor(author),
+    googleBooksQuery(`inauthor:"${author.replace(/"/g, '')}"`, { maxResults: 40, withoutCover: true }).catch(
+      (error) => {
+        failedSources++;
+        console.warn('Google Books (autor)', error);
+        return [] as OnlineEdition[];
+      },
+    ),
+    searchOpenLibraryByAuthor(author).catch((error) => {
+      failedSources++;
+      console.warn('Open Library (autor)', error);
+      return [] as OnlineEdition[];
+    }),
+  ]);
+
+  const known = new Set(matches.map((book) => workKey(book.title)));
+  const works = new Map<string, OnlineEdition>();
+  for (const edition of [...google, ...openLibrary]) {
+    const key = workKey(edition.title);
+    if (!key || known.has(key) || !matchesAuthor(edition.authors, author)) continue;
+    const current = works.get(key);
+    if (!current || (!current.coverUrl && edition.coverUrl)) works.set(key, edition);
+  }
+  return { matches, works: [...works.values()].slice(0, 40), onlineFailed: failedSources === 2 };
 });
 
 /** Baixa uma capa de um catálogo online permitido e devolve como data URL. */
@@ -478,6 +547,196 @@ export const readCatalogCard = onCall({ secrets: [OPENAI_API_KEY], timeoutSecond
 
   const { isCatalogCard: _ignored, ...draft } = result;
   return { draft: { ...draft, isbn, pages: draft.pages ?? 0 }, match };
+});
+
+// ---------------------------------------------------------------------------
+// Edição de livros: editores alteram direto; os demais enviam sugestões para aprovação
+// ---------------------------------------------------------------------------
+
+type BookChanges = Partial<
+  Pick<BookDoc, 'title' | 'subtitle' | 'authors' | 'publisher' | 'year' | 'isbn' | 'pages' | 'edition' | 'coverUrl'>
+>;
+
+const TEXT_FIELDS = ['subtitle', 'publisher', 'edition'] as const;
+/** Campos copiados nas estantes e indicações, que precisam acompanhar a edição do livro. */
+const SHELF_FIELDS = ['title', 'authors', 'coverUrl', 'pages'] as const;
+const RECOMMENDATION_FIELDS = ['title', 'authors', 'coverUrl'] as const;
+
+/** Editores ficam em `meta/roles.editors` (lista de uids), alterada só pelo console ou pelo servidor. */
+async function isEditor(uid: string): Promise<boolean> {
+  const roles = await db.doc('meta/roles').get();
+  return ((roles.get('editors') as string[] | undefined) ?? []).includes(uid);
+}
+
+function invalid(message: string): never {
+  throw new HttpsError('invalid-argument', message);
+}
+
+/** Valida e limpa os campos enviados; só os campos presentes são considerados. */
+function sanitizeChanges(raw: unknown): BookChanges {
+  const data = (raw ?? {}) as Record<string, unknown>;
+  const changes: BookChanges = {};
+  if ('title' in data) {
+    const title = String(data['title'] ?? '').trim();
+    if (!title || title.length > 300) invalid('Informe um título válido.');
+    changes.title = title;
+  }
+  for (const key of TEXT_FIELDS) {
+    if (key in data) changes[key] = String(data[key] ?? '').trim().slice(0, 300);
+  }
+  if ('authors' in data) {
+    if (!Array.isArray(data['authors'])) invalid('Autores inválidos.');
+    changes.authors = (data['authors'] as unknown[])
+      .map((a) => String(a).trim().slice(0, 200))
+      .filter(Boolean)
+      .slice(0, 20);
+  }
+  if ('year' in data) {
+    const year = data['year'] === null || data['year'] === '' ? null : Number(data['year']);
+    if (year !== null && (!Number.isInteger(year) || year < 0 || year > 2100)) invalid('Ano inválido.');
+    changes.year = year;
+  }
+  if ('isbn' in data) changes.isbn = String(data['isbn'] ?? '').replace(/[^0-9Xx]/g, '').toUpperCase().slice(0, 13);
+  if ('pages' in data) {
+    const pages = Number(data['pages'] ?? 0);
+    if (!Number.isInteger(pages) || pages < 0 || pages >= 20000) invalid('Número de páginas inválido.');
+    changes.pages = pages;
+  }
+  return changes;
+}
+
+/** Endereço público de uma capa enviada pelo app para o Storage (`covers/...`). */
+async function uploadedCoverUrl(path: unknown): Promise<string> {
+  if (typeof path !== 'string' || !/^covers\/[\w.-]+$/.test(path)) invalid('Capa inválida.');
+  const file = getStorage().bucket().file(path);
+  const [exists] = await file.exists();
+  if (!exists) invalid('A capa enviada não foi encontrada. Tente novamente.');
+  return getDownloadURL(file);
+}
+
+async function deleteUploadedCover(path: string | undefined) {
+  if (!path) return;
+  await getStorage().bucket().file(path).delete({ ignoreNotFound: true }).catch((error) => {
+    console.warn('Capa não apagada', path, error);
+  });
+}
+
+function currentValue(book: BookDoc, key: keyof BookChanges): unknown {
+  const value = book[key];
+  if (key === 'authors') return value ?? [];
+  if (key === 'year') return value ?? null;
+  if (key === 'pages') return value ?? 0;
+  return value ?? '';
+}
+
+/** Mantém só os campos que de fato mudam em relação ao livro atual. */
+function changedFields(book: BookDoc, changes: BookChanges): BookChanges {
+  const diff: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(changes)) {
+    if (JSON.stringify(value) !== JSON.stringify(currentValue(book, key as keyof BookChanges))) {
+      diff[key] = value;
+    }
+  }
+  return diff as BookChanges;
+}
+
+function pick<K extends string>(source: Record<string, unknown>, keys: readonly K[]): Record<string, unknown> {
+  return Object.fromEntries(keys.filter((k) => k in source).map((k) => [k, source[k]]));
+}
+
+/** Aplica a edição no catálogo e nas cópias do livro nas estantes e indicações. */
+async function applyBookEdit(bookId: string, changes: BookChanges, uid: string) {
+  const update: Record<string, unknown> = { ...changes, updatedAt: FieldValue.serverTimestamp(), updatedBy: uid };
+  if (changes.title) update['titleKey'] = normalize(changes.title);
+  await db.doc(`books/${bookId}`).update(update);
+
+  const shelfFields = pick(changes, SHELF_FIELDS);
+  const recommendationFields = pick(changes, RECOMMENDATION_FIELDS);
+  if (!Object.keys(shelfFields).length) return;
+  const [shelves, recommendations] = await Promise.all([
+    db.collectionGroup('shelf').where('bookId', '==', bookId).get(),
+    Object.keys(recommendationFields).length
+      ? db.collection('recommendations').where('bookId', '==', bookId).get()
+      : null,
+  ]);
+  const writer = db.bulkWriter();
+  shelves.docs.forEach((doc) => void writer.update(doc.ref, shelfFields));
+  recommendations?.docs.forEach((doc) => void writer.update(doc.ref, recommendationFields));
+  await writer.close();
+}
+
+/**
+ * Edita um livro do catálogo. Para editores, a alteração vale na hora; para os demais, vira
+ * uma sugestão pendente que um editor aprova ou recusa. A nova capa, se houver, é enviada
+ * antes pelo app para o Storage e chega aqui como `coverPath`.
+ */
+export const editBook = onCall(async (request) => {
+  const { uid } = requireAllowed(request);
+  const data = (request.data ?? {}) as { bookId?: string; changes?: unknown; coverPath?: string };
+  const bookId = String(data.bookId ?? '');
+  if (!bookId) invalid('Livro inválido.');
+  const bookSnap = await db.doc(`books/${bookId}`).get();
+  if (!bookSnap.exists) throw new HttpsError('not-found', 'Livro não encontrado.');
+  const book = bookSnap.data() as BookDoc;
+
+  const changes = sanitizeChanges(data.changes);
+  if (data.coverPath) changes.coverUrl = await uploadedCoverUrl(data.coverPath);
+  const diff = changedFields(book, changes);
+  if (!Object.keys(diff).length) invalid('Nenhum dado foi alterado.');
+
+  if (await isEditor(uid)) {
+    await applyBookEdit(bookId, diff, uid);
+    return { applied: true };
+  }
+
+  const profile = await db.doc(`users/${uid}`).get();
+  await db.collection('bookEdits').add({
+    bookId,
+    bookTitle: book.title,
+    fromUid: uid,
+    fromName: (profile.get('name') as string | undefined) ?? '',
+    changes: diff,
+    before: Object.fromEntries(Object.keys(diff).map((k) => [k, currentValue(book, k as keyof BookChanges)])),
+    coverPath: diff.coverUrl ? data.coverPath : '',
+    status: 'pending',
+    createdAt: Date.now(),
+  });
+  return { applied: false };
+});
+
+/** Um editor aprova (aplicando as alterações) ou recusa uma sugestão de edição. */
+export const reviewBookEdit = onCall(async (request) => {
+  const { uid } = requireAllowed(request);
+  if (!(await isEditor(uid))) throw new HttpsError('permission-denied', 'Só editores revisam sugestões.');
+  const { editId, approve } = (request.data ?? {}) as { editId?: string; approve?: boolean };
+  if (!editId) invalid('Sugestão inválida.');
+
+  const editRef = db.doc(`bookEdits/${editId}`);
+  // Marca a sugestão como revisada antes de aplicar, para que dois editores não a apliquem juntos.
+  const edit = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(editRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Sugestão não encontrada.');
+    if (snap.get('status') !== 'pending') {
+      throw new HttpsError('failed-precondition', 'Esta sugestão já foi revisada.');
+    }
+    tx.update(editRef, { status: approve ? 'approved' : 'rejected', reviewedBy: uid, reviewedAt: Date.now() });
+    return snap.data() as { bookId: string; changes: BookChanges; coverPath?: string };
+  });
+
+  if (!approve) {
+    await deleteUploadedCover(edit.coverPath);
+    return { ok: true };
+  }
+  try {
+    const bookSnap = await db.doc(`books/${edit.bookId}`).get();
+    if (!bookSnap.exists) throw new HttpsError('not-found', 'O livro desta sugestão não existe mais.');
+    const diff = changedFields(bookSnap.data() as BookDoc, edit.changes);
+    if (Object.keys(diff).length) await applyBookEdit(edit.bookId, diff, uid);
+  } catch (error) {
+    await editRef.update({ status: 'pending', reviewedBy: FieldValue.delete(), reviewedAt: FieldValue.delete() });
+    throw error;
+  }
+  return { ok: true };
 });
 
 // ---------------------------------------------------------------------------

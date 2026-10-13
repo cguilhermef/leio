@@ -4,6 +4,11 @@
       <app-icon name="back" />
     </button>
     <span class="grow"></span>
+    @if (book()) {
+      <a class="btn small secondary" [routerLink]="['/livro', id(), 'editar']">
+        <app-icon name="edit" [size]="18" /> {{ edits.isEditor() ? 'Editar' : 'Sugerir edição' }}
+      </a>
+    }
     @if (social.connections().length && (entry() || book())) {
       <button type="button" class="btn small secondary" (click)="openRecommend()">
         <app-icon name="send" [size]="18" /> Indicar

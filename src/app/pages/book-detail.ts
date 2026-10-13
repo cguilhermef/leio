@@ -11,8 +11,9 @@ import {
 } from '@angular/core';
 import { Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { CatalogService } from '../core/catalog.service';
+import { EditsService } from '../core/edits.service';
 import { errorMessage } from '../core/firebase';
 import { Book, ReadingLog, STATUS_LABEL, ShelfEntry, ShelfStatus } from '../core/models';
 import { ShelfService } from '../core/shelf.service';
@@ -27,7 +28,7 @@ type DateAction = 'finish' | 'reread' | 'add-read' | 'edit-log';
 @Component({
   selector: 'app-book-detail',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, BookCover, Icon, LogDialog],
+  imports: [FormsModule, RouterLink, BookCover, Icon, LogDialog],
   templateUrl: './book-detail.html',
   styleUrl: './book-detail.scss',
 })
@@ -35,6 +36,7 @@ export class BookDetailPage {
   private catalog = inject(CatalogService);
   protected shelf = inject(ShelfService);
   protected social = inject(SocialService);
+  protected edits = inject(EditsService);
   private router = inject(Router);
   protected location = inject(Location);
 

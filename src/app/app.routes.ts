@@ -35,6 +35,11 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/book-detail').then((m) => m.BookDetailPage),
       },
       {
+        path: 'livro/:id/editar',
+        title: 'Editar livro - Leio',
+        loadComponent: () => import('./pages/edit-book').then((m) => m.EditBookPage),
+      },
+      {
         path: 'adicionar',
         title: 'Adicionar livro - Leio',
         loadComponent: () => import('./pages/add-book').then((m) => m.AddBookPage),
