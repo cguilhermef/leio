@@ -84,7 +84,7 @@ Functions, regras e índices a cada push na branch `main`. No repositório do Gi
 
 - **Variável** `FIREBASE_PROJECT_ID`: ID do projeto Firebase.
 - **Segredo** `FIREBASE_SERVICE_ACCOUNT`: JSON de uma conta de serviço do projeto com os papéis
-  *Firebase Admin*, *Cloud Functions Admin*, *Service Account User*, *Secret Manager Viewer*,
+  *Firebase Admin*, *Cloud Functions Admin*, *Service Account User*, *Secret Manager Admin*,
   *Cloud Build Editor* e *Artifact Registry Administrator*.
 
 Deploy manual: `npx firebase-tools deploy`.
