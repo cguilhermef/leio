@@ -60,7 +60,7 @@ storage.rules      regras do Storage (capas)
 6. Em Authentication > Configurações > Domínios autorizados, incluir o domínio de produção, se
    usar um domínio próprio.
 
-Parâmetros opcionais das functions (pedidos no primeiro deploy ou definidos em `functions/.env`):
+Parâmetros das functions, definidos em [functions/.env](functions/.env) (obrigatório para o deploy não interativo):
 
 | Parâmetro | Padrão | Uso |
 | --- | --- | --- |

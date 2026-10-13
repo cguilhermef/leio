@@ -53,6 +53,8 @@ ui-debug.log
 # Credenciais e variáveis locais (nunca versionar)
 .env
 .env.*
+# Parâmetros não secretos das functions, necessários no deploy
+!functions/.env
 **/service-account*.json
 **/*-sa.json
 **/*firebase-adminsdk*.json
