@@ -1,0 +1,157 @@
+<div class="page">
+  <div class="page-head">
+    @if (step() === 'cover') {
+      <a routerLink="/livros" class="icon-btn" aria-label="Voltar"><app-icon name="back" /></a>
+    } @else {
+      <button type="button" class="icon-btn" aria-label="Recomeçar" (click)="restart()"><app-icon name="back" /></button>
+    }
+    <h1>Adicionar livro</h1>
+  </div>
+
+  <ol class="steps" aria-label="Etapas">
+    <li [class.done]="step() !== 'cover'" [class.current]="step() === 'cover' || step() === 'matches'">Capa</li>
+    <li [class.done]="step() === 'form'" [class.current]="step() === 'card'">Ficha</li>
+    <li [class.current]="step() === 'form'">Dados</li>
+  </ol>
+
+  @if (busy()) {
+    <div class="card working">
+      <div class="spinner" role="status"></div>
+      <p>{{ busy() }}</p>
+    </div>
+  } @else {
+    @switch (step()) {
+      @case ('cover') {
+        <section class="card capture">
+          <app-icon name="camera" [size]="40" />
+          <h2>Fotografe a capa do livro</h2>
+          <p class="muted">Vamos identificar o título e o autor e procurar o livro no catálogo.</p>
+          <label class="btn">
+            <app-icon name="camera" [size]="18" /> Fotografar capa
+            <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onCover($event)" />
+          </label>
+          <button type="button" class="btn secondary" (click)="manual()">Preencher manualmente</button>
+        </section>
+      }
+
+      @case ('matches') {
+        <section>
+          <h2>É um destes?</h2>
+          <p class="muted">Encontramos livros parecidos no catálogo.</p>
+          <ul class="list-plain">
+            @for (book of matches(); track book.id) {
+              <li>
+                <app-book-cover class="thumb" [url]="book.coverUrl" [title]="book.title" />
+                <span class="grow">
+                  <strong>{{ book.title }}</strong><br />
+                  <span class="muted small">
+                    {{ authorsLabel(book.authors) }}{{ book.publisher ? ' - ' + book.publisher : '' }}{{ book.year ? ', ' + book.year : '' }}
+                  </span>
+                </span>
+                <button type="button" class="btn small" (click)="choose(book)">É este</button>
+              </li>
+            }
+          </ul>
+          <div class="actions">
+            <button type="button" class="btn secondary block" (click)="notListed()">Não, é outro livro</button>
+          </div>
+        </section>
+      }
+
+      @case ('card') {
+        <section class="card capture">
+          @if (coverImage()) {
+            <img class="preview" [src]="coverImage()" alt="Capa fotografada" />
+          }
+          <h2>Agora, a ficha catalográfica</h2>
+          <p class="muted">
+            Este livro ainda não está no catálogo. Fotografe a ficha catalográfica, normalmente no
+            verso da folha de rosto, para preencher os dados.
+          </p>
+          <label class="btn">
+            <app-icon name="camera" [size]="18" /> Fotografar ficha
+            <input class="sr-only" type="file" accept="image/*" capture="environment" (change)="onCard($event)" />
+          </label>
+          <button type="button" class="btn secondary" (click)="manual()">Preencher manualmente</button>
+        </section>
+      }
+
+      @case ('form') {
+        @if (isbnMatch(); as existing) {
+          <div class="card existing">
+            <app-book-cover class="thumb" [url]="existing.coverUrl" [title]="existing.title" />
+            <div class="grow">
+              <p><strong>Este livro já está no catálogo</strong></p>
+              <p class="muted small">{{ existing.title }} - {{ authorsLabel(existing.authors) }}</p>
+            </div>
+            <button type="button" class="btn small" (click)="choose(existing)">Usar</button>
+          </div>
+        }
+
+        <form class="details" (ngSubmit)="save('toread')">
+          <div class="form-head">
+            @if (coverImage()) {
+              <img class="preview small-preview" [src]="coverImage()" alt="Capa" />
+            }
+            <p class="muted small">Confira os dados antes de salvar.</p>
+          </div>
+          <label class="field">
+            <span>Título</span>
+            <input class="input" name="title" required [ngModel]="form().title" (ngModelChange)="update('title', $event)" />
+          </label>
+          <label class="field">
+            <span>Subtítulo</span>
+            <input class="input" name="subtitle" [ngModel]="form().subtitle" (ngModelChange)="update('subtitle', $event)" />
+          </label>
+          <label class="field">
+            <span>Autores (separados por vírgula)</span>
+            <input class="input" name="authors" [ngModel]="form().authors" (ngModelChange)="update('authors', $event)" />
+          </label>
+          <div class="row">
+            <label class="field">
+              <span>Páginas</span>
+              <input class="input" name="pages" type="number" min="1" inputmode="numeric"
+                [ngModel]="form().pages" (ngModelChange)="update('pages', $event)" />
+            </label>
+            <label class="field">
+              <span>Ano</span>
+              <input class="input" name="year" type="number" inputmode="numeric"
+                [ngModel]="form().year" (ngModelChange)="update('year', $event)" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Editora</span>
+            <input class="input" name="publisher" [ngModel]="form().publisher" (ngModelChange)="update('publisher', $event)" />
+          </label>
+          <div class="row">
+            <label class="field">
+              <span>ISBN</span>
+              <input class="input" name="isbn" inputmode="numeric" [ngModel]="form().isbn" (ngModelChange)="update('isbn', $event)" />
+            </label>
+            <label class="field">
+              <span>Edição</span>
+              <input class="input" name="edition" [ngModel]="form().edition" (ngModelChange)="update('edition', $event)" />
+            </label>
+          </div>
+
+          @if (error()) {
+            <p class="error">{{ error() }}</p>
+          }
+
+          <p class="save-label">Salvar em:</p>
+          <div class="actions save">
+            <button type="submit" class="btn">Lerei</button>
+            <button type="button" class="btn secondary" (click)="save('reading')">Lendo</button>
+            <button type="button" class="btn secondary" (click)="save('read')">Lido em</button>
+            <input class="input date" type="date" name="finishedDate" aria-label="Data de conclusão"
+              [max]="today" [ngModel]="finishedDate()" (ngModelChange)="finishedDate.set($event)" />
+          </div>
+        </form>
+      }
+    }
+
+    @if (error() && step() !== 'form') {
+      <p class="error">{{ error() }}</p>
+    }
+  }
+</div>

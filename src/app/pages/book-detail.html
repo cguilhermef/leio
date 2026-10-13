@@ -1,0 +1,195 @@
+<div class="page">
+  <div class="page-head">
+    <button type="button" class="icon-btn" aria-label="Voltar" (click)="location.back()">
+      <app-icon name="back" />
+    </button>
+    <span class="grow"></span>
+    @if (social.connections().length && (entry() || book())) {
+      <button type="button" class="btn small secondary" (click)="openRecommend()">
+        <app-icon name="send" [size]="18" /> Indicar
+      </button>
+    }
+  </div>
+
+  @if (!entry() && !bookLoaded()) {
+    <div class="spinner" role="status" aria-label="Carregando"></div>
+  } @else if (!entry() && !book()) {
+    <p class="muted">Livro não encontrado.</p>
+  } @else {
+    <header class="hero">
+      <app-book-cover class="cover" [url]="coverUrl()" [title]="title()" />
+      <div class="hero-info">
+        <h1>{{ title() }}</h1>
+        @if (book()?.subtitle) {
+          <p class="subtitle">{{ book()!.subtitle }}</p>
+        }
+        <p>{{ authorsLabel(authors()) }}</p>
+        <dl class="facts muted small">
+          @if (pages()) {
+            <div><dt>Páginas</dt><dd>{{ pages() }}</dd></div>
+          }
+          @if (book()?.publisher) {
+            <div><dt>Editora</dt><dd>{{ book()!.publisher }}</dd></div>
+          }
+          @if (book()?.year) {
+            <div><dt>Ano</dt><dd>{{ book()!.year }}</dd></div>
+          }
+          @if (book()?.isbn) {
+            <div><dt>ISBN</dt><dd>{{ book()!.isbn }}</dd></div>
+          }
+        </dl>
+      </div>
+    </header>
+
+    @if (message()) {
+      <p class="card notice">{{ message() }}</p>
+    }
+    @if (error()) {
+      <p class="error">{{ error() }}</p>
+    }
+
+    @if (entry(); as e) {
+      <div class="segmented" role="group" aria-label="Situação do livro">
+        @for (s of statuses; track s) {
+          <button type="button" [class.active]="e.status === s" [disabled]="busy()"
+            (click)="changeStatus(e, s)">{{ statusLabel[s] }}</button>
+        }
+      </div>
+
+      @if (!e.pages) {
+        <form class="card pages-form" (ngSubmit)="savePages(e)">
+          <label class="field">
+            <span>Quantas páginas tem este livro?</span>
+            <input class="input" type="number" min="1" name="pages" [(ngModel)]="pagesInput" />
+          </label>
+          <button type="submit" class="btn small">Salvar</button>
+        </form>
+      }
+
+      <section class="card block">
+        @switch (e.status) {
+          @case ('reading') {
+            @if (e.pages) {
+              <p>Página <strong>{{ e.currentPage }}</strong> de {{ e.pages }} ({{ progress(e) }}%)</p>
+              <div class="progress"><span [style.width.%]="progress(e)"></span></div>
+            }
+            @if (e.reads > 0) {
+              <p class="muted small">Esta é a {{ e.reads + 1 }}a leitura deste livro.</p>
+            }
+            <div class="actions">
+              <button type="button" class="btn" (click)="openLog(e)" [disabled]="busy()">Registrar página</button>
+              <button type="button" class="btn secondary" (click)="askDate('finish')" [disabled]="busy()">Terminei</button>
+            </div>
+          }
+          @case ('toread') {
+            <p class="muted">Este livro está na sua lista de próximas leituras.</p>
+            <div class="actions">
+              <button type="button" class="btn" (click)="changeStatus(e, 'reading')" [disabled]="busy()">Começar a ler</button>
+            </div>
+          }
+          @case ('read') {
+            <p>
+              Lido {{ e.reads === 1 ? 'uma vez' : e.reads + ' vezes' }}
+              @if (e.finishedDates.length) {
+                <span class="muted">(última em {{ fmtDate(e.finishedDates[e.finishedDates.length - 1]) }})</span>
+              }
+            </p>
+            <div class="actions">
+              <button type="button" class="btn" (click)="askDate('reread')" [disabled]="busy()">
+                <app-icon name="repeat" [size]="18" /> Li mais uma vez
+              </button>
+              <button type="button" class="btn secondary" (click)="startReread(e)" [disabled]="busy()">Reler acompanhando as páginas</button>
+            </div>
+          }
+        }
+      </section>
+
+      @if (finishedThisYear()) {
+        <label class="card toggle">
+          <input type="checkbox" [checked]="countsForGoal()" (change)="toggleGoal($any($event.target).checked)" />
+          <span>Contar na meta de {{ year }}</span>
+        </label>
+      }
+
+      @if (logs().length) {
+        <section class="section">
+          <h2>Histórico</h2>
+          <ul class="list-plain history">
+            @for (log of logs(); track log.id) {
+              <li>
+                <span class="date">{{ fmtDate(log.date) }}</span>
+                <span class="grow">{{ logLabel(log) }}</span>
+                <button type="button" class="icon-btn" aria-label="Apagar registro" title="Apagar registro"
+                  (click)="deleteLog(e, log)" [disabled]="busy()">
+                  <app-icon name="trash" [size]="18" />
+                </button>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
+      <div class="actions section">
+        <button type="button" class="btn danger small" (click)="remove(e)" [disabled]="busy()">Remover dos meus livros</button>
+      </div>
+    } @else if (book()) {
+      <section class="card block">
+        <p>Adicionar aos meus livros como:</p>
+        <div class="actions">
+          <button type="button" class="btn" (click)="add('toread')" [disabled]="busy()">Lerei</button>
+          <button type="button" class="btn secondary" (click)="add('reading')" [disabled]="busy()">Lendo</button>
+          <button type="button" class="btn secondary" (click)="add('read')" [disabled]="busy()">Lido</button>
+        </div>
+      </section>
+    }
+  }
+</div>
+
+<app-log-dialog (finished)="message.set('Leitura concluída.')" />
+
+<dialog #dateDialog class="sheet">
+  <form (ngSubmit)="confirmDate()">
+    <h2>
+      @switch (dateAction()) {
+        @case ('reread') { Quando você terminou esta releitura? }
+        @default { Quando você terminou a leitura? }
+      }
+    </h2>
+    <label class="field">
+      <span>Data de conclusão</span>
+      <input class="input" type="date" name="date" required [max]="today" [(ngModel)]="date" />
+    </label>
+    <div class="actions">
+      <button type="submit" class="btn">Confirmar</button>
+      <button type="button" class="btn secondary" (click)="dateDialog.close()">Cancelar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog #recommendDialog class="sheet">
+  <form (ngSubmit)="sendRecommendation()">
+    <h2>Indicar "{{ title() }}"</h2>
+    <p class="muted small">Escolha quem vai receber a indicação.</p>
+    <ul class="list-plain">
+      @for (person of social.connections(); track person.uid) {
+        <li>
+          <label class="person">
+            <input type="checkbox" [checked]="recipients().has(person.uid)" (change)="toggleRecipient(person.uid)" />
+            @if (person.photoURL) {
+              <img class="avatar" [src]="person.photoURL" alt="" referrerpolicy="no-referrer" />
+            }
+            <span>{{ person.name }}</span>
+          </label>
+        </li>
+      }
+    </ul>
+    <label class="field">
+      <span>Mensagem (opcional)</span>
+      <textarea class="input" name="note" rows="2" maxlength="280" [(ngModel)]="note"></textarea>
+    </label>
+    <div class="actions">
+      <button type="submit" class="btn" [disabled]="!recipients().size">Enviar indicação</button>
+      <button type="button" class="btn secondary" (click)="recommendDialog.close()">Cancelar</button>
+    </div>
+  </form>
+</dialog>

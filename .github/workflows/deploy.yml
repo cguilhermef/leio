@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Instalar dependências do app
+        run: npm ci
+
+      - name: Testes
+        run: npx ng test --watch=false
+
+      - name: Build do app
+        run: npx ng build
+
+      - name: Instalar dependências das functions
+        run: npm ci
+        working-directory: functions
+
+      - name: Credenciais do Google Cloud
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+
+      - name: Deploy no Firebase
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: >
+          npx --yes firebase-tools@latest deploy
+          --project "$FIREBASE_PROJECT_ID"
+          --only hosting,functions,firestore,storage
+          --non-interactive --force

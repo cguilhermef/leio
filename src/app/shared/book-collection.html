@@ -1,0 +1,70 @@
+<div class="toolbar">
+  <label class="search">
+    <app-icon name="search" [size]="18" />
+    <input type="search" placeholder="Buscar por título ou autor" [value]="query()"
+      (input)="query.set($any($event.target).value)" aria-label="Buscar livros" />
+  </label>
+  <div class="view-toggle" role="group" aria-label="Modo de exibição">
+    <button type="button" class="icon-btn" [class.active]="view() === 'grid'" (click)="setView('grid')"
+      aria-label="Ver em grade" title="Grade">
+      <app-icon name="grid" [size]="20" />
+    </button>
+    <button type="button" class="icon-btn" [class.active]="view() === 'list'" (click)="setView('list')"
+      aria-label="Ver em lista" title="Lista">
+      <app-icon name="list" [size]="20" />
+    </button>
+  </div>
+</div>
+
+<div class="chips" role="tablist">
+  @for (f of filters; track f.value) {
+    <button type="button" role="tab" class="chip" [class.active]="filter() === f.value"
+      [attr.aria-selected]="filter() === f.value" (click)="selectedFilter.set(f.value)">
+      {{ f.label }} <span class="count">{{ counts()[f.value] }}</span>
+    </button>
+  }
+</div>
+
+@if (visible().length) {
+  @if (view() === 'grid') {
+    <ul class="grid">
+      @for (e of visible(); track e.bookId) {
+        <li>
+          <a [routerLink]="['/livro', e.bookId]" [title]="e.title">
+            <app-book-cover [url]="e.coverUrl" [title]="e.title" />
+            @if (e.status === 'reading' && e.pages) {
+              <span class="bar"><span [style.width.%]="progress(e)"></span></span>
+            }
+          </a>
+        </li>
+      }
+    </ul>
+  } @else {
+    <ul class="rows">
+      @for (e of visible(); track e.bookId) {
+        <li>
+          <a [routerLink]="['/livro', e.bookId]">
+            <app-book-cover class="thumb" [url]="e.coverUrl" [title]="e.title" />
+            <span class="info">
+              <strong>{{ e.title }}</strong>
+              <span class="muted">{{ authorsLabel(e.authors) }}</span>
+              <span class="meta">
+                <span class="status status-{{ e.status }}">{{ statusLabel[e.status] }}</span>
+                @if (e.status === 'reading' && e.pages) {
+                  <span>pág. {{ e.currentPage }} de {{ e.pages }}</span>
+                } @else if (e.pages) {
+                  <span>{{ e.pages }} páginas</span>
+                }
+                @if (e.reads > 1) {
+                  <span>{{ e.reads }} leituras</span>
+                }
+              </span>
+            </span>
+          </a>
+        </li>
+      }
+    </ul>
+  }
+} @else {
+  <p class="empty">{{ query() ? 'Nenhum livro encontrado para esta busca.' : emptyText() }}</p>
+}

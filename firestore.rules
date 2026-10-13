@@ -1,0 +1,94 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Acesso liberado pela função registerUser (limite de usuários).
+    function allowed() {
+      return request.auth != null && request.auth.token.allowed == true;
+    }
+
+    function isMe(uid) {
+      return allowed() && request.auth.uid == uid;
+    }
+
+    function myConnections() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.connections;
+    }
+
+    function connectedTo(uid) {
+      return allowed() && uid in myConnections();
+    }
+
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    match /users/{uid} {
+      // Perfis (nome, foto, email) são visíveis para os usuários do app.
+      allow read: if allowed();
+      // Criação e conexões são feitas pelas Cloud Functions.
+      allow update: if isMe(uid) && onlyChanges(['name', 'photoURL']);
+
+      match /shelf/{bookId} {
+        allow read: if isMe(uid) || connectedTo(uid);
+        allow write: if isMe(uid);
+      }
+
+      match /logs/{logId} {
+        allow read, write: if isMe(uid);
+      }
+
+      match /goals/{year} {
+        allow read, write: if isMe(uid);
+      }
+    }
+
+    match /books/{bookId} {
+      allow read: if allowed();
+      allow create: if allowed()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 300
+        && request.resource.data.authors is list
+        && request.resource.data.pages is int
+        && request.resource.data.pages >= 0
+        && request.resource.data.pages < 20000;
+      allow update: if allowed() && resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdBy == resource.data.createdBy;
+    }
+
+    match /invites/{inviteId} {
+      allow read: if allowed() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toEmail == request.auth.token.email.lower()
+      );
+      allow create: if allowed()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.toEmail is string
+        && request.resource.data.toEmail == request.resource.data.toEmail.lower();
+      // Quem convidou pode cancelar. Aceitar e recusar passam pela função respondInvite.
+      allow update: if allowed()
+        && resource.data.fromUid == request.auth.uid
+        && request.resource.data.status == 'declined'
+        && onlyChanges(['status']);
+    }
+
+    match /recommendations/{recId} {
+      allow read: if allowed() && (
+        resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid
+      );
+      allow create: if allowed()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid in myConnections()
+        && request.resource.data.seen == false;
+      allow update: if allowed()
+        && resource.data.toUid == request.auth.uid
+        && onlyChanges(['seen']);
+    }
+
+    // meta/limits e aiUsage são acessados apenas pelas Cloud Functions.
+  }
+}

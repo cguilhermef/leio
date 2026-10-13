@@ -1,0 +1,33 @@
+@if (auth.state() === 'ready') {
+  <header class="topbar">
+    <a routerLink="/" class="brand">Leio</a>
+    <a routerLink="/notificacoes" class="icon-btn" aria-label="Notificações" title="Notificações">
+      <app-icon name="bell" />
+      @if (social.unseenCount()) {
+        <span class="badge">{{ social.unseenCount() }}</span>
+      }
+    </a>
+    <button type="button" class="icon-btn" (click)="auth.signOut()" aria-label="Sair" title="Sair">
+      <app-icon name="logout" />
+    </button>
+  </header>
+}
+
+<main>
+  @if (auth.state() === 'loading') {
+    <div class="spinner" role="status" aria-label="Carregando"></div>
+  }
+  <router-outlet />
+</main>
+
+@if (auth.state() === 'ready') {
+  <nav class="tabbar" aria-label="Navegação principal">
+    @for (item of nav; track item.path) {
+      <a [routerLink]="item.path" routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: item.exact }" [class.add]="item.path === '/adicionar'">
+        <app-icon [name]="item.icon" [size]="item.path === '/adicionar' ? 26 : 22" />
+        <span>{{ item.label }}</span>
+      </a>
+    }
+  </nav>
+}

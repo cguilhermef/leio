@@ -1,0 +1,98 @@
+<div class="page">
+  <p class="greeting muted">Olá{{ firstName() ? ', ' + firstName() : '' }}</p>
+
+  <a routerLink="/estatisticas" class="card counter" aria-label="Ver detalhes das páginas lidas">
+    <span class="label">Páginas lidas</span>
+    <strong class="total">{{ fmt(total()) }}</strong>
+    <span class="unique"><strong>{{ fmt(unique()) }}</strong> páginas únicas</span>
+    <app-icon name="next" class="chevron" [size]="20" />
+  </a>
+
+  @if (justFinished(); as done) {
+    <div class="card notice">
+      <p>Você terminou <strong>{{ done.title }}</strong>. Boa leitura!</p>
+      <button type="button" class="icon-btn" aria-label="Fechar" (click)="justFinished.set(null)">
+        <app-icon name="close" [size]="18" />
+      </button>
+    </div>
+  }
+
+  @if (plan(); as p) {
+    <a routerLink="/meta" class="card week">
+      <div class="week-head">
+        <span class="label">Meta da semana</span>
+        <span class="muted small">{{ p.doneBooks }} de {{ p.goalBooks }} livros no ano</span>
+      </div>
+      @if (p.remainingBooks === 0) {
+        <p>Meta do ano cumprida. Parabéns!</p>
+      } @else {
+        <p><strong>{{ fmt(weekPages()) }}</strong> de {{ fmt(p.weeklyPages) }} páginas nesta semana</p>
+        <div class="progress"><span [style.width.%]="weekPercent()"></span></div>
+      }
+    </a>
+  } @else if (shelf.loaded()) {
+    <a routerLink="/meta" class="card week empty-goal">
+      <app-icon name="target" />
+      <span>Defina sua meta de livros para o ano e veja quantas páginas ler por semana.</span>
+    </a>
+  }
+
+  <section class="section">
+    <div class="section-head">
+      <h2>Lendo agora</h2>
+      <a routerLink="/livros" [queryParams]="{ status: 'reading' }">Ver todos</a>
+    </div>
+    @if (shelf.reading().length) {
+      <ul class="list-plain">
+        @for (e of shelf.reading(); track e.bookId) {
+          <li>
+            <a [routerLink]="['/livro', e.bookId]" class="thumb-link">
+              <app-book-cover class="thumb" [url]="e.coverUrl" [title]="e.title" />
+            </a>
+            <a [routerLink]="['/livro', e.bookId]" class="grow book-info">
+              <strong>{{ e.title }}</strong>
+              <span class="muted small">{{ authorsLabel(e.authors) }}</span>
+              @if (e.pages) {
+                <div class="progress"><span [style.width.%]="progress(e)"></span></div>
+                <span class="muted small">pág. {{ e.currentPage }} de {{ e.pages }}</span>
+              }
+            </a>
+            <button type="button" class="btn small secondary" (click)="logDialog.open(e)">
+              Registrar
+            </button>
+          </li>
+        }
+      </ul>
+    } @else if (shelf.loaded()) {
+      <p class="muted">
+        Nenhum livro em leitura. <a routerLink="/adicionar">Adicione um livro</a> ou escolha um da sua
+        <a routerLink="/livros" [queryParams]="{ status: 'toread' }">lista de próximos</a>.
+      </p>
+    }
+  </section>
+
+  @if (shelf.lastRead().length) {
+    <section class="section">
+      <div class="section-head">
+        <h2>Últimos lidos</h2>
+        <a routerLink="/livros" [queryParams]="{ status: 'read' }">Ver todos</a>
+      </div>
+      <ul class="list-plain">
+        @for (e of shelf.lastRead(); track e.bookId) {
+          <li>
+            <a [routerLink]="['/livro', e.bookId]" class="thumb-link">
+              <app-book-cover class="thumb" [url]="e.coverUrl" [title]="e.title" />
+            </a>
+            <a [routerLink]="['/livro', e.bookId]" class="grow book-info">
+              <strong>{{ e.title }}</strong>
+              <span class="muted small">{{ authorsLabel(e.authors) }}</span>
+              <span class="muted small">Concluído em {{ fmtDate(lastFinished(e)) }}</span>
+            </a>
+          </li>
+        }
+      </ul>
+    </section>
+  }
+</div>
+
+<app-log-dialog #logDialog (finished)="justFinished.set($event)" />
