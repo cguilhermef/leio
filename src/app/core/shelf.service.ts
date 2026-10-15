@@ -237,6 +237,7 @@ export class ShelfService {
     );
   }
 
+  /** Páginas da edição deste leitor; edições do catálogo não as sobrescrevem (RN-07). */
   async setPages(entry: ShelfEntry, pages: number): Promise<void> {
     await setDoc(this.entryRef(entry.bookId), { pages, updatedAt: Date.now() }, { merge: true });
   }

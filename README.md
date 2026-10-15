@@ -31,19 +31,12 @@ storage.rules      regras do Storage (capas)
 
 ### Regras de negócio
 
-- **Páginas totais**: soma de todas as páginas lidas, incluindo releituras.
-- **Páginas únicas**: maior página alcançada em cada livro, sem contar releituras.
-- **Registro de página**: o leitor informa a página em que está; a diferença para o último registro
-  (ou para a página 0, no primeiro registro) vira páginas lidas naquela data. Ao chegar na última
-  página, o livro é marcado como lido.
-- **Meta semanal**: livros que faltam para a meta do ano. Primeiro entram as páginas restantes dos
-  livros em leitura, depois os livros "Lerei" em ordem de inclusão. Se faltarem livros, usamos a
-  média de páginas do usuário. O total é dividido pelas semanas restantes do ano.
-- **Limite de usuários**: os primeiros 50 que entram recebem acesso (custom claim `allowed`).
-  Para alterar, defina o parâmetro `MAX_USERS` das functions.
-- **Editores do catálogo**: quem tem o custom claim `role: 'editor'` edita livros na hora e revisa
-  as sugestões de edição dos demais. O claim é definido pelo script abaixo, com o JSON da conta de
-  serviço do projeto salvo na raiz (fora do git) e o `npm install` das functions feito:
+O catálogo das regras (`RN-xx`), com onde cada uma é aplicada e os pontos de tensão em aberto,
+está em [docs/regras-de-negocio.md](docs/regras-de-negocio.md). Leia antes de mudar uma regra.
+
+- **Editores do catálogo** (RN-06): o custom claim `role: 'editor'` é definido pelo script abaixo,
+  com o JSON da conta de serviço do projeto salvo na raiz (fora do git) e o `npm install` das
+  functions feito:
   ```sh
   npm run editor -- add maria@exemplo.com
   npm run editor -- remove maria@exemplo.com

@@ -558,8 +558,11 @@ type BookChanges = Partial<
 >;
 
 const TEXT_FIELDS = ['subtitle', 'publisher', 'edition'] as const;
-/** Campos copiados nas estantes e indicações, que precisam acompanhar a edição do livro. */
-const SHELF_FIELDS = ['title', 'authors', 'coverUrl', 'pages'] as const;
+/**
+ * Campos copiados nas estantes e indicações, que precisam acompanhar a edição do livro.
+ * As páginas ficam de fora: são da edição que cada leitor tem (RN-07).
+ */
+const SHELF_FIELDS = ['title', 'authors', 'coverUrl'] as const;
 const RECOMMENDATION_FIELDS = ['title', 'authors', 'coverUrl'] as const;
 
 /** Editores têm o custom claim `role: 'editor'`, definido pelo script `npm run editor`. */
@@ -643,30 +646,42 @@ function pick<K extends string>(source: Record<string, unknown>, keys: readonly 
   return Object.fromEntries(keys.filter((k) => k in source).map((k) => [k, source[k]]));
 }
 
-/** Aplica a edição no catálogo e nas cópias do livro nas estantes e indicações. */
-async function applyBookEdit(bookId: string, changes: BookChanges, uid: string) {
+/**
+ * Aplica a edição no catálogo e nas cópias do livro nas estantes e indicações. Uma nova
+ * contagem de páginas só chega às estantes em "Lerei" que ainda têm a contagem anterior do
+ * catálogo; as demais guardam a edição que o leitor leu ou ajustou (RN-07).
+ */
+async function applyBookEdit(bookId: string, changes: BookChanges, uid: string, previous: BookDoc) {
   const update: Record<string, unknown> = { ...changes, updatedAt: FieldValue.serverTimestamp(), updatedBy: uid };
   if (changes.title) update['titleKey'] = normalize(changes.title);
   await db.doc(`books/${bookId}`).update(update);
 
   const shelfFields = pick(changes, SHELF_FIELDS);
   const recommendationFields = pick(changes, RECOMMENDATION_FIELDS);
-  if (!Object.keys(shelfFields).length) return;
+  const pagesChanged = changes.pages !== undefined;
+  if (!Object.keys(shelfFields).length && !pagesChanged) return;
   const [shelves, recommendations] = await Promise.all([
     db.collectionGroup('shelf').where('bookId', '==', bookId).get(),
     Object.keys(recommendationFields).length
       ? db.collection('recommendations').where('bookId', '==', bookId).get()
       : null,
   ]);
+  const previousPages = previous.pages ?? 0;
   const writer = db.bulkWriter();
-  shelves.docs.forEach((doc) => void writer.update(doc.ref, shelfFields));
+  shelves.docs.forEach((doc) => {
+    const fields = { ...shelfFields };
+    if (pagesChanged && doc.get('status') === 'toread' && (doc.get('pages') ?? 0) === previousPages) {
+      fields['pages'] = changes.pages;
+    }
+    if (Object.keys(fields).length) void writer.update(doc.ref, fields);
+  });
   recommendations?.docs.forEach((doc) => void writer.update(doc.ref, recommendationFields));
   await writer.close();
 }
 
 /**
- * Edita um livro do catálogo. Para editores, a alteração vale na hora; para os demais, vira
- * uma sugestão pendente que um editor aprova ou recusa. A nova capa, se houver, é enviada
+ * Edita um livro do catálogo (RN-06). Para editores, a alteração vale na hora; para os demais,
+ * vira uma sugestão pendente que um editor aprova ou recusa. A nova capa, se houver, é enviada
  * antes pelo app para o Storage e chega aqui como `coverPath`.
  */
 export const editBook = onCall(async (request) => {
@@ -684,7 +699,7 @@ export const editBook = onCall(async (request) => {
   if (!Object.keys(diff).length) invalid('Nenhum dado foi alterado.');
 
   if (isEditor(request)) {
-    await applyBookEdit(bookId, diff, uid);
+    await applyBookEdit(bookId, diff, uid, book);
     return { applied: true };
   }
 
@@ -729,8 +744,9 @@ export const reviewBookEdit = onCall(async (request) => {
   try {
     const bookSnap = await db.doc(`books/${edit.bookId}`).get();
     if (!bookSnap.exists) throw new HttpsError('not-found', 'O livro desta sugestão não existe mais.');
-    const diff = changedFields(bookSnap.data() as BookDoc, edit.changes);
-    if (Object.keys(diff).length) await applyBookEdit(edit.bookId, diff, uid);
+    const book = bookSnap.data() as BookDoc;
+    const diff = changedFields(book, edit.changes);
+    if (Object.keys(diff).length) await applyBookEdit(edit.bookId, diff, uid, book);
   } catch (error) {
     await editRef.update({ status: 'pending', reviewedBy: FieldValue.delete(), reviewedAt: FieldValue.delete() });
     throw error;
