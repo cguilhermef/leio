@@ -58,8 +58,11 @@ function requireImage(data: unknown): string {
   return image;
 }
 
-/** Limita o uso diário da OpenAI por usuário, para controlar custos. */
-async function consumeAiQuota(uid: string): Promise<void> {
+/** Limita o uso diário da OpenAI por usuário, para controlar custos (RN-08). */
+async function consumeAiQuota(
+  uid: string,
+  message = 'Você atingiu o limite diário de leituras de fotos. Tente amanhã ou preencha manualmente.',
+): Promise<void> {
   const day = new Date().toISOString().slice(0, 10);
   const ref = db.doc(`aiUsage/${uid}_${day}`);
   const limit = AI_DAILY_LIMIT.value();
@@ -67,13 +70,34 @@ async function consumeAiQuota(uid: string): Promise<void> {
     const snap = await tx.get(ref);
     const count = (snap.get('count') as number | undefined) ?? 0;
     if (count >= limit) {
-      throw new HttpsError(
-        'resource-exhausted',
-        'Você atingiu o limite diário de leituras de fotos. Tente amanhã ou preencha manualmente.',
-      );
+      throw new HttpsError('resource-exhausted', message);
     }
     tx.set(ref, { uid, day, count: count + 1 }, { merge: true });
   });
+}
+
+/** Pede ao modelo uma resposta em JSON no formato do schema, a partir de texto e de uma imagem opcional. */
+async function askModel<T>(
+  instructions: string,
+  image: { url: string; detail: 'high' | 'low' } | null,
+  schemaName: string,
+  schema: Record<string, unknown>,
+): Promise<T> {
+  const client = new OpenAI({ apiKey: OPENAI_API_KEY.value() });
+  const response = await client.responses.create({
+    model: OPENAI_MODEL.value(),
+    input: [
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: instructions },
+          ...(image ? [{ type: 'input_image' as const, image_url: image.url, detail: image.detail }] : []),
+        ],
+      },
+    ],
+    text: { format: { type: 'json_schema', name: schemaName, schema, strict: true } },
+  });
+  return JSON.parse(response.output_text) as T;
 }
 
 async function extractFromImage<T>(
@@ -82,22 +106,8 @@ async function extractFromImage<T>(
   schemaName: string,
   schema: Record<string, unknown>,
 ): Promise<T> {
-  const client = new OpenAI({ apiKey: OPENAI_API_KEY.value() });
   try {
-    const response = await client.responses.create({
-      model: OPENAI_MODEL.value(),
-      input: [
-        {
-          role: 'user',
-          content: [
-            { type: 'input_text', text: instructions },
-            { type: 'input_image', image_url: image, detail: 'high' },
-          ],
-        },
-      ],
-      text: { format: { type: 'json_schema', name: schemaName, schema, strict: true } },
-    });
-    return JSON.parse(response.output_text) as T;
+    return await askModel<T>(instructions, { url: image, detail: 'high' }, schemaName, schema);
   } catch (error) {
     console.error('OpenAI error', error);
     throw new HttpsError('unavailable', 'Não foi possível ler a imagem agora. Tente novamente.');
@@ -598,13 +608,30 @@ function sanitizeChanges(raw: unknown): BookChanges {
     if (year !== null && (!Number.isInteger(year) || year < 0 || year > 2100)) invalid('Ano inválido.');
     changes.year = year;
   }
-  if ('isbn' in data) changes.isbn = String(data['isbn'] ?? '').replace(/[^0-9Xx]/g, '').toUpperCase().slice(0, 13);
+  if ('isbn' in data) {
+    const isbn = String(data['isbn'] ?? '').replace(/[^0-9Xx]/g, '').toUpperCase();
+    if (isbn && !validIsbn(isbn)) invalid('ISBN inválido. Confira os dígitos.');
+    changes.isbn = isbn;
+  }
   if ('pages' in data) {
     const pages = Number(data['pages'] ?? 0);
     if (!Number.isInteger(pages) || pages < 0 || pages >= 20000) invalid('Número de páginas inválido.');
     changes.pages = pages;
   }
   return changes;
+}
+
+/** Confere o dígito verificador de um ISBN-10 ou ISBN-13 (já sem hífens). */
+function validIsbn(isbn: string): boolean {
+  if (/^\d{9}[\dX]$/.test(isbn)) {
+    const sum = [...isbn].reduce((acc, c, i) => acc + (c === 'X' ? 10 : Number(c)) * (10 - i), 0);
+    return sum % 11 === 0;
+  }
+  if (/^\d{13}$/.test(isbn)) {
+    const sum = [...isbn].reduce((acc, c, i) => acc + Number(c) * (i % 2 ? 3 : 1), 0);
+    return sum % 10 === 0;
+  }
+  return false;
 }
 
 /** Endereço público de uma capa enviada pelo app para o Storage (`covers/...`). */
@@ -679,12 +706,121 @@ async function applyBookEdit(bookId: string, changes: BookChanges, uid: string, 
   await writer.close();
 }
 
+// ---------------------------------------------------------------------------
+// Moderação das sugestões de edição (RN-09)
+// ---------------------------------------------------------------------------
+
+type EditDecision = { status: 'approved' | 'rejected' | 'pending'; reason: string };
+
+const MODERATION_MODEL = 'omni-moderation-latest';
+
+const TEXT_LABELS: Record<Exclude<keyof BookChanges, 'coverUrl'>, string> = {
+  title: 'Título',
+  subtitle: 'Subtítulo',
+  authors: 'Autores',
+  publisher: 'Editora',
+  year: 'Ano',
+  isbn: 'ISBN',
+  pages: 'Páginas',
+  edition: 'Edição',
+};
+
+function fieldText(value: unknown): string {
+  if (Array.isArray(value)) return value.join(', ');
+  return value === null || value === undefined ? '' : String(value);
+}
+
+/** Campos de texto alterados, no formato "Campo: antes → depois". */
+function describeChanges(book: BookDoc, changes: BookChanges): string {
+  return (Object.keys(TEXT_LABELS) as (keyof typeof TEXT_LABELS)[])
+    .filter((key) => key in changes)
+    .map((key) => `${TEXT_LABELS[key]}: "${fieldText(currentValue(book, key))}" → "${fieldText(changes[key])}"`)
+    .join('\n');
+}
+
+/**
+ * Passa o texto e a capa novos pela moderação da OpenAI. Devolve `null` se a moderação
+ * não respondeu, para que a sugestão vá ao editor.
+ */
+async function isFlagged(text: string, coverUrl: string | undefined): Promise<boolean | null> {
+  const input: OpenAI.ModerationMultiModalInput[] = [];
+  if (text) input.push({ type: 'text', text });
+  if (coverUrl) input.push({ type: 'image_url', image_url: { url: coverUrl } });
+  if (!input.length) return false;
+  try {
+    const client = new OpenAI({ apiKey: OPENAI_API_KEY.value() });
+    const response = await client.moderations.create({ model: MODERATION_MODEL, input });
+    return response.results.some((r) => r.flagged);
+  } catch (error) {
+    console.error('Moderação indisponível', error);
+    return null;
+  }
+}
+
+const EDIT_REVIEW_PROMPT = `Você revisa sugestões de edição de um catálogo colaborativo de livros.
+Decida se a alteração pode ser aplicada sem revisão humana.
+
+Aplique (apply = true) só quando a alteração parecer uma correção ou complemento legítimo do mesmo
+livro: erro de digitação ou acento, nome de autor completado, subtítulo, editora, ano, edição,
+ISBN ou número de páginas plausíveis, ou capa que seja de fato a capa de um livro compatível com o
+título e os autores.
+
+Mande para revisão (apply = false) se houver qualquer dúvida: texto sem sentido, piada, propaganda,
+links, dados pessoais, troca por outro livro (título ou autores muito diferentes), mudança grande
+no número de páginas sem motivo aparente, ou imagem que não seja a capa de um livro ou não combine
+com o título.
+
+Em "reason", explique a decisão em uma frase curta, em português, para o editor do catálogo.`;
+
+/** Pede ao modelo para decidir se a sugestão pode ser aplicada direto. `null` se ele não respondeu. */
+async function reviewWithAi(book: BookDoc, changes: BookChanges): Promise<{ apply: boolean; reason: string } | null> {
+  const context = [
+    `Livro atual: "${book.title}", de ${fieldText(book.authors) || 'autor não informado'}.`,
+    describeChanges(book, changes) || 'Nenhum campo de texto alterado.',
+    changes.coverUrl ? 'A nova capa enviada está na imagem.' : 'A capa não foi alterada.',
+  ].join('\n\n');
+  try {
+    return await askModel<{ apply: boolean; reason: string }>(
+      `${EDIT_REVIEW_PROMPT}\n\n${context}`,
+      changes.coverUrl ? { url: changes.coverUrl, detail: 'low' } : null,
+      'edit_review',
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: { apply: { type: 'boolean' }, reason: { type: 'string' } },
+        required: ['apply', 'reason'],
+      },
+    );
+  } catch (error) {
+    console.error('Revisão por IA indisponível', error);
+    return null;
+  }
+}
+
+/**
+ * Decide o destino de uma sugestão: recusada se a moderação marcar conteúdo impróprio,
+ * aplicada se a IA a considerar uma correção legítima, ou pendente para um editor.
+ */
+async function moderateEdit(book: BookDoc, changes: BookChanges): Promise<EditDecision> {
+  const text = (Object.keys(TEXT_LABELS) as (keyof typeof TEXT_LABELS)[])
+    .filter((key) => key in changes && key !== 'year' && key !== 'pages')
+    .map((key) => fieldText(changes[key]))
+    .join('\n');
+  const flagged = await isFlagged(text, changes.coverUrl);
+  if (flagged) return { status: 'rejected', reason: 'A moderação automática marcou o conteúdo como impróprio.' };
+  if (flagged === null) return { status: 'pending', reason: 'A moderação automática não respondeu.' };
+
+  const review = await reviewWithAi(book, changes);
+  if (!review) return { status: 'pending', reason: 'A revisão automática não respondeu.' };
+  return { status: review.apply ? 'approved' : 'pending', reason: review.reason };
+}
+
 /**
  * Edita um livro do catálogo (RN-06). Para editores, a alteração vale na hora; para os demais,
- * vira uma sugestão pendente que um editor aprova ou recusa. A nova capa, se houver, é enviada
- * antes pelo app para o Storage e chega aqui como `coverPath`.
+ * vira uma sugestão que a moderação automática aplica, recusa ou deixa para um editor (RN-09).
+ * A nova capa, se houver, é enviada antes pelo app para o Storage e chega aqui como `coverPath`.
  */
-export const editBook = onCall(async (request) => {
+export const editBook = onCall({ secrets: [OPENAI_API_KEY], timeoutSeconds: 120 }, async (request) => {
   const { uid } = requireAllowed(request);
   const data = (request.data ?? {}) as { bookId?: string; changes?: unknown; coverPath?: string };
   const bookId = String(data.bookId ?? '');
@@ -703,19 +839,41 @@ export const editBook = onCall(async (request) => {
     return { applied: true };
   }
 
-  const profile = await db.doc(`users/${uid}`).get();
-  await db.collection('bookEdits').add({
+  await consumeAiQuota(uid, 'Você atingiu o limite diário de edições. Tente novamente amanhã.');
+  const [profile, decision] = await Promise.all([db.doc(`users/${uid}`).get(), moderateEdit(book, diff)]);
+  const coverPath = diff.coverUrl ? data.coverPath : '';
+  const now = Date.now();
+  // Toda sugestão fica registrada, inclusive as aplicadas ou recusadas pela moderação automática.
+  const editRef = await db.collection('bookEdits').add({
     bookId,
     bookTitle: book.title,
     fromUid: uid,
     fromName: (profile.get('name') as string | undefined) ?? '',
     changes: diff,
     before: Object.fromEntries(Object.keys(diff).map((k) => [k, currentValue(book, k as keyof BookChanges)])),
-    coverPath: diff.coverUrl ? data.coverPath : '',
-    status: 'pending',
-    createdAt: Date.now(),
+    coverPath,
+    status: decision.status,
+    aiReason: decision.reason,
+    ...(decision.status === 'pending' ? {} : { reviewedBy: 'ai', reviewedAt: now }),
+    createdAt: now,
   });
-  return { applied: false };
+
+  if (decision.status === 'rejected') {
+    await deleteUploadedCover(coverPath);
+    throw new HttpsError(
+      'failed-precondition',
+      'A alteração não foi aceita porque a moderação automática encontrou conteúdo impróprio.',
+    );
+  }
+  if (decision.status === 'pending') return { applied: false };
+  try {
+    await applyBookEdit(bookId, diff, uid, book);
+  } catch (error) {
+    console.error('Edição aprovada pela IA não aplicada', error);
+    await editRef.update({ status: 'pending', reviewedBy: FieldValue.delete(), reviewedAt: FieldValue.delete() });
+    return { applied: false };
+  }
+  return { applied: true };
 });
 
 /** Um editor aprova (aplicando as alterações) ou recusa uma sugestão de edição. */

@@ -82,6 +82,9 @@ function fieldText(value: unknown): string {
                       </div>
                     }
                   </dl>
+                  @if (edit.aiReason) {
+                    <span class="muted small block ai-reason">Revisão automática: {{ edit.aiReason }}</span>
+                  }
                 </span>
                 <span class="buttons">
                   <button type="button" class="btn small" (click)="review(edit, true)" [disabled]="busy()">Aprovar</button>
@@ -134,6 +137,7 @@ function fieldText(value: unknown): string {
     .diff dt { color: var(--muted); }
     .diff dt::after { content: ':'; }
     .diff dd { margin: 0; }
+    .ai-reason { margin-top: 6px; }
   `,
 })
 export class NotificationsPage implements OnDestroy {

@@ -77,7 +77,8 @@ export class CatalogService {
 
   /**
    * Edita o livro: para editores vale na hora (`applied`); para os demais vira uma sugestão
-   * que aguarda aprovação. A nova capa, se houver, é enviada antes para o Storage.
+   * que a moderação automática aplica na hora, recusa (erro) ou deixa para um editor.
+   * A nova capa, se houver, é enviada antes para o Storage.
    */
   async edit(bookId: string, changes: BookChanges, coverDataUrl?: string): Promise<{ applied: boolean }> {
     let coverPath: string | undefined;

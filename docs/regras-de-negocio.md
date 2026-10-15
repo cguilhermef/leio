@@ -72,13 +72,17 @@ functions e as regras recusam o acesso.
 - Quem tem o custom claim `role: 'editor'` (script `npm run editor`) edita livros do catálogo na
   hora.
 - Os demais enviam uma **sugestão** (`bookEdits`) só com os campos que mudaram e os valores
-  anteriores. Um editor aprova (aplicando no catálogo) ou recusa (apagando a capa enviada).
+  anteriores. A moderação automática (RN-09) aplica, recusa ou deixa a sugestão pendente.
+- Um editor aprova (aplicando no catálogo) ou recusa (apagando a capa enviada) as pendentes.
 - A sugestão é marcada como revisada numa transação antes de ser aplicada, para que dois
   editores não a apliquem juntos. Se a aplicação falhar, ela volta a ficar pendente.
+- O ISBN informado precisa ter dígito verificador válido (ISBN-10 ou ISBN-13), também para
+  editores.
 
-**Onde:** functions `editBook`, `reviewBookEdit`, `core/edits.service.ts`, `pages/edit-book.ts`,
-`firestore.rules` (`/bookEdits`).
-**Interage com:** RN-07, tensões 2 e 3.
+**Onde:** functions `editBook`, `reviewBookEdit`, `sanitizeChanges`, `validIsbn`,
+`core/edits.service.ts`, `pages/edit-book.ts`, `pages/notifications.ts`, `firestore.rules`
+(`/bookEdits`).
+**Interage com:** RN-07, RN-09, tensões 2 e 3.
 
 ## RN-07 · Cópia do livro na estante
 
@@ -102,6 +106,30 @@ alterando as páginas únicas e a meta semanal de quem já tinha lido o livro.
 - Cada usuário tem até `AI_DAILY_LIMIT` (padrão 40) leituras por dia, para controlar custos.
 
 **Onde:** functions `identifyCover`, `readCatalogCard`, `consumeAiQuota`, `extractFromImage`.
+**Interage com:** RN-09 (cada sugestão de edição também consome uma unidade do limite diário).
+
+## RN-09 · Moderação automática das sugestões
+
+Vale para quem não é editor, em duas etapas:
+
+1. **Moderação da OpenAI** (`omni-moderation-latest`, gratuita) no texto alterado e na capa nova.
+   Se marcar conteúdo impróprio, a sugestão é **recusada**: a capa enviada é apagada e o usuário
+   vê o motivo.
+2. **Revisão pelo modelo** (`OPENAI_MODEL`), que recebe os valores antes e depois e a capa nova.
+   Correção ou complemento legítimo do mesmo livro é **aplicado na hora**. Qualquer dúvida (troca
+   por outro livro, texto sem sentido, propaganda, dados pessoais, imagem que não é capa ou não
+   combina com o título, mudança grande de páginas) deixa a sugestão **pendente** para um editor,
+   com o motivo.
+
+- Se a moderação ou a revisão não responderem, a sugestão fica pendente (na dúvida, vai ao
+  editor).
+- Toda sugestão fica registrada em `bookEdits`, com `status`, `aiReason` e `reviewedBy: 'ai'`
+  quando a decisão foi automática.
+
+**Onde:** functions `editBook`, `moderateEdit`, `isFlagged`, `reviewWithAi`, `askModel`;
+`pages/notifications.ts` (motivo exibido ao editor).
+**Decidido em:** 15/10/2026, para não depender de um editor em cada correção.
+**Interage com:** RN-06, RN-07, RN-08, tensões 2, 6 e 7.
 
 ---
 
@@ -114,10 +142,10 @@ definição explícita. Revise esta lista ao mudar qualquer regra citada.
    15/10/2026 pela RN-07: correções de páginas no acervo não reescrevem o que o leitor já leu.
    **Risco que continua:** quem adicionou o livro com a contagem errada e já começou a ler
    precisa ajustar as páginas na própria estante; o app não avisa que o catálogo mudou.
-2. **Conteúdo impróprio em edições (RN-06).** Uma capa ou um texto ofensivo só é barrado pelo
-   editor; sugestões ficam paradas até alguém revisar. Em estudo: moderação automática (checagens
-   objetivas como ISBN e comparação com Google Books, mais IA para capa e texto), aplicando direto
-   o que for seguro e mandando ao editor só o que for ambíguo.
+2. **Conteúdo impróprio em edições (RN-06 × RN-09).** Resolvido em 15/10/2026 pela moderação
+   automática. **Risco que continua:** a IA pode aprovar uma alteração errada mas inofensiva
+   (por exemplo, um número de páginas plausível porém incorreto). A comparação com Google Books
+   ainda não é feita.
 3. **Edição que vale na hora para quem editou (RN-06 × RN-07).** Proposta: a edição grava
    personalizações na estante de quem editou e vira sugestão para o acervo. Como as conexões veem
    a estante (`firestore.rules`, `/shelf`), as personalizações não revisadas teriam que aparecer
@@ -127,3 +155,9 @@ definição explícita. Revise esta lista ao mudar qualquer regra citada.
    `min` (RN-02), mas a página atual fica acima do total até o próximo registro.
 5. **Livro lido sem data (RN-03 × RN-04).** Não conta para a meta nem para as estatísticas por
    período, mesmo que tenha sido lido no ano.
+6. **Cadastro de livro novo sem moderação (RN-09).** O app cria livros direto no Firestore
+   (`firestore.rules`, `/books` `create`), sem passar por function. Capa e texto de um livro novo
+   não são moderados; só as edições posteriores.
+7. **Edição aplicada pela IA sem desfazer (RN-09).** O valor anterior fica guardado em
+   `bookEdits.before`, mas ainda não há tela para o editor ver as edições aplicadas
+   automaticamente nem para desfazê-las.

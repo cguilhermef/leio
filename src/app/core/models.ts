@@ -125,5 +125,7 @@ export interface BookEdit {
   /** Valores do livro quando a sugestão foi feita. */
   before: BookChanges;
   status: BookEditStatus;
+  /** Motivo da decisão da moderação automática (RN-09). */
+  aiReason?: string;
   createdAt: number;
 }

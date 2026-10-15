@@ -37,7 +37,7 @@ import { Icon } from '../shared/icon';
         <section class="card done">
           <app-icon name="check" [size]="32" />
           <h2>Sugestão enviada</h2>
-          <p class="muted">As alterações passam a valer depois que um editor aprovar.</p>
+          <p class="muted">Esta alteração precisa ser conferida por um editor antes de valer para todos.</p>
           <a class="btn" [routerLink]="['/livro', id()]">Voltar ao livro</a>
         </section>
       } @else if (busy()) {
@@ -47,7 +47,10 @@ import { Icon } from '../shared/icon';
         </div>
       } @else {
         @if (!edits.isEditor()) {
-          <p class="muted intro">Sua sugestão é revisada por um editor antes de valer para todos.</p>
+          <p class="muted intro">
+            Sua sugestão passa por uma revisão automática. Correções valem na hora; casos em dúvida vão
+            para um editor.
+          </p>
         }
 
         <section class="card cover-card">
@@ -245,7 +248,7 @@ export class EditBookPage {
       return;
     }
     const isEditor = this.edits.isEditor();
-    void this.withBusy(isEditor ? 'Salvando...' : 'Enviando sugestão...', async () => {
+    void this.withBusy(isEditor ? 'Salvando...' : 'Revisando a sugestão...', async () => {
       const { applied } = await this.catalog.edit(this.id(), draft, this.newCover() || undefined);
       if (applied) void this.router.navigate(['/livro', this.id()], { replaceUrl: true });
       else this.sent.set(true);
