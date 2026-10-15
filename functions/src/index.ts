@@ -966,6 +966,46 @@ export const reviewBookEdit = onCall(async (request) => {
   return { ok: true };
 });
 
+/**
+ * Um editor desfaz uma edição já aplicada (RN-11). Só voltam ao valor anterior os campos que
+ * ainda estão com o valor da edição, para não apagar correções feitas depois dela.
+ */
+export const revertBookEdit = onCall(async (request) => {
+  const { uid } = requireAllowed(request);
+  if (!isEditor(request)) throw new HttpsError('permission-denied', 'Só editores desfazem edições.');
+  const { editId } = (request.data ?? {}) as { editId?: string };
+  if (!editId) invalid('Edição inválida.');
+
+  const editRef = db.doc(`bookEdits/${editId}`);
+  const edit = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(editRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Edição não encontrada.');
+    if (snap.get('status') !== 'approved') {
+      throw new HttpsError('failed-precondition', 'Só edições aplicadas podem ser desfeitas.');
+    }
+    tx.update(editRef, { status: 'reverted', revertedBy: uid, revertedAt: Date.now() });
+    return snap.data() as { bookId: string; changes: BookChanges; before: BookChanges; coverPath?: string };
+  });
+
+  try {
+    const bookSnap = await db.doc(`books/${edit.bookId}`).get();
+    if (!bookSnap.exists) throw new HttpsError('not-found', 'O livro desta edição não existe mais.');
+    const book = bookSnap.data() as BookDoc;
+    const restore: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(edit.changes)) {
+      if (JSON.stringify(currentValue(book, key as keyof BookChanges)) === JSON.stringify(value)) {
+        restore[key] = edit.before[key as keyof BookChanges];
+      }
+    }
+    if (Object.keys(restore).length) await applyBookEdit(edit.bookId, restore as BookChanges, uid, book);
+    if ('coverUrl' in restore) await deleteUploadedCover(edit.coverPath);
+  } catch (error) {
+    await editRef.update({ status: 'approved', revertedBy: FieldValue.delete(), revertedAt: FieldValue.delete() });
+    throw error;
+  }
+  return { ok: true };
+});
+
 // ---------------------------------------------------------------------------
 // Conexões entre perfis
 // ---------------------------------------------------------------------------

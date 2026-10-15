@@ -111,7 +111,7 @@ export type BookChanges = Partial<
   Pick<Book, 'title' | 'subtitle' | 'authors' | 'publisher' | 'year' | 'isbn' | 'pages' | 'edition' | 'coverUrl'>
 >;
 
-export type BookEditStatus = 'pending' | 'approved' | 'rejected';
+export type BookEditStatus = 'pending' | 'approved' | 'rejected' | 'reverted';
 
 /** Sugestão de edição de um livro, revisada por um editor (`bookEdits/{id}`). */
 export interface BookEdit {
@@ -127,5 +127,7 @@ export interface BookEdit {
   status: BookEditStatus;
   /** Motivo da decisão da moderação automática (RN-09). */
   aiReason?: string;
+  /** Quem decidiu: o uid do editor ou `'ai'`, para as decisões automáticas. */
+  reviewedBy?: string;
   createdAt: number;
 }

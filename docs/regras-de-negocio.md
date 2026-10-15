@@ -147,6 +147,20 @@ Vale para quem não é editor, em duas etapas:
 **Decidido em:** 15/10/2026.
 **Interage com:** RN-03, RN-09, tensão 6.
 
+## RN-11 · Desfazer edição aplicada
+
+- Editores veem, em Notificações, as últimas 20 edições aplicadas pela moderação automática, e
+  podem desfazer qualquer edição aplicada.
+- Só voltam ao valor anterior (`before`) os campos que ainda estão com o valor da edição; uma
+  correção feita depois é mantida. A volta segue a RN-07 (as páginas só mudam nas estantes em
+  "Lerei" que estão com o valor da edição).
+- A edição fica `reverted`, e a capa enviada é apagada se a capa anterior voltou.
+
+**Onde:** function `revertBookEdit`, `core/edits.service.ts` (`autoApplied`, `revert`),
+`pages/notifications.ts`, `firestore.indexes.json` (`bookEdits`: status, reviewedBy, createdAt).
+**Decidido em:** 15/10/2026.
+**Interage com:** RN-07, RN-09.
+
 ---
 
 ## Tensões e decisões em aberto
@@ -176,6 +190,6 @@ definição explícita. Revise esta lista ao mudar qualquer regra citada.
    não avisa quem cadastrou (o livro ou a capa somem da estante). Se o gatilho rodar antes de o
    livro entrar na estante, a entrada fica órfã. A moderação de livros novos não usa a revisão
    pelo modelo, então uma capa inofensiva mas errada passa.
-7. **Edição aplicada pela IA sem desfazer (RN-09).** O valor anterior fica guardado em
-   `bookEdits.before`, mas ainda não há tela para o editor ver as edições aplicadas
-   automaticamente nem para desfazê-las.
+7. **Edição aplicada pela IA (RN-09 × RN-11).** Resolvido em 15/10/2026: o editor vê e desfaz.
+   **Risco que continua:** as edições aplicadas não geram aviso nem entram no contador de
+   notificações, então o editor só as vê se abrir a tela. Só as 20 mais recentes aparecem.

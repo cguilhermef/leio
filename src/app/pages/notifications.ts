@@ -96,6 +96,43 @@ function fieldText(value: unknown): string {
         </section>
       }
 
+      @if (edits.autoApplied().length) {
+        <section class="section">
+          <h2 class="subhead">Aplicadas automaticamente</h2>
+          <ul class="list-plain">
+            @for (edit of edits.autoApplied(); track edit.id) {
+              <li class="edit">
+                <span class="grow">
+                  <span class="muted small block">{{ edit.fromName }} alterou</span>
+                  <a class="plain" [routerLink]="['/livro', edit.bookId]"><strong>{{ edit.bookTitle }}</strong></a>
+                  @if (edit.changes.coverUrl) {
+                    <span class="cover-diff">
+                      <app-book-cover class="thumb" [url]="edit.before.coverUrl" [title]="edit.bookTitle" />
+                      <app-icon name="back" class="arrow" [size]="16" />
+                      <app-book-cover class="thumb" [url]="edit.changes.coverUrl" [title]="edit.bookTitle" />
+                    </span>
+                  }
+                  <dl class="diff small">
+                    @for (field of changedFields(edit); track field.label) {
+                      <div>
+                        <dt>{{ field.label }}</dt>
+                        <dd><s class="muted">{{ field.before || 'vazio' }}</s> {{ field.after || 'vazio' }}</dd>
+                      </div>
+                    }
+                  </dl>
+                  @if (edit.aiReason) {
+                    <span class="muted small block ai-reason">Revisão automática: {{ edit.aiReason }}</span>
+                  }
+                </span>
+                <span class="buttons">
+                  <button type="button" class="btn small secondary" (click)="revert(edit)" [disabled]="busy()">Desfazer</button>
+                </span>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
       <section class="section">
         <h2 class="subhead">Indicações</h2>
         @if (social.recommendations().length) {
@@ -168,6 +205,19 @@ export class NotificationsPage implements OnDestroy {
     this.error.set('');
     try {
       await this.edits.review(edit, approve);
+    } catch (error) {
+      this.error.set(errorMessage(error));
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  protected async revert(edit: BookEdit) {
+    if (!confirm(`Desfazer a edição de "${edit.bookTitle}"? Os campos voltam ao valor anterior.`)) return;
+    this.busy.set(true);
+    this.error.set('');
+    try {
+      await this.edits.revert(edit);
     } catch (error) {
       this.error.set(errorMessage(error));
     } finally {
