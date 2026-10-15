@@ -251,7 +251,9 @@
       <input class="input" type="date" name="finishedDate" required [max]="today"
         [ngModel]="finishedDate()" (ngModelChange)="finishedDate.set($event)" />
     </label>
-    <p class="muted small">Se não lembrar o dia exato, uma data aproximada já ajuda nas estatísticas.</p>
+    <button type="button" class="btn secondary small" (click)="saveWithoutDate()">Não lembro</button>
+    <p class="muted small">Se não lembrar o dia exato, uma data aproximada já ajuda nas estatísticas.
+      Sem data, o livro fica em "Lidos sem data".</p>
     <div class="actions">
       <button type="submit" class="btn">Salvar como lido</button>
       <button type="button" class="btn secondary" (click)="readDialog.close()">Cancelar</button>

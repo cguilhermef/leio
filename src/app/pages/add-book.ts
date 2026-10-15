@@ -270,6 +270,12 @@ export class AddBookPage {
     this.save('read');
   }
 
+  /** "Não lembro": salva como lido sem data de conclusão. */
+  protected saveWithoutDate() {
+    this.finishedDate.set('');
+    this.confirmFinishedDate();
+  }
+
   protected save(status: ShelfStatus) {
     const draft = draftFromForm(this.form());
     if (!draft.title) {

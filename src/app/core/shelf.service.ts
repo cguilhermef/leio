@@ -105,7 +105,7 @@ export class ShelfService {
     return this.loadLogs(where('bookId', '==', bookId));
   }
 
-  /** Adiciona um livro do catálogo à estante. */
+  /** Adiciona um livro do catálogo à estante. Lido com `finishedDate` vazio fica sem data. */
   async add(book: Book, status: ShelfStatus, finishedDate = isoDate()): Promise<void> {
     const now = Date.now();
     const entry: ShelfEntry = {
@@ -130,9 +130,10 @@ export class ShelfService {
         maxPage: entry.pages,
         pagesRead: entry.pages,
         reads: 1,
-        finishedDates: [finishedDate],
+        finishedDates: finishedDate ? [finishedDate] : [],
       });
-      if (entry.pages > 0) {
+      // Sem data não há registro de leitura: o livro não entra nas estatísticas por período.
+      if (entry.pages > 0 && finishedDate) {
         const { ref, log } = this.newLog(entry, 0, entry.pages, entry.pages, 'finish', finishedDate);
         batch.set(ref, log);
       }
