@@ -3,6 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { getDownloadURL, getStorage } from 'firebase-admin/storage';
 import { setGlobalOptions } from 'firebase-functions/v2';
+import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { defineInt, defineSecret, defineString } from 'firebase-functions/params';
 import OpenAI from 'openai';
@@ -814,6 +815,59 @@ async function moderateEdit(book: BookDoc, changes: BookChanges): Promise<EditDe
   if (!review) return { status: 'pending', reason: 'A revisão automática não respondeu.' };
   return { status: review.apply ? 'approved' : 'pending', reason: review.reason };
 }
+
+/**
+ * Modera um livro recém-cadastrado pelo app (RN-10). Capa imprópria é removida; título,
+ * autores ou outros textos impróprios fazem o livro ser apagado do catálogo e da estante
+ * de quem o cadastrou (até aqui, só ele tem o livro).
+ */
+export const moderateNewBook = onDocumentCreated(
+  { document: 'books/{bookId}', secrets: [OPENAI_API_KEY], timeoutSeconds: 120 },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const bookId = snap.id;
+    const book = snap.data() as BookDoc & { createdBy?: string };
+    const text = [book.title, book.subtitle, fieldText(book.authors), book.publisher, book.edition]
+      .filter(Boolean)
+      .join('\n');
+    const [textFlagged, coverFlagged] = await Promise.all([
+      isFlagged(text, undefined),
+      book.coverUrl ? isFlagged('', book.coverUrl) : Promise.resolve(false),
+    ]);
+    if (!textFlagged && !coverFlagged) {
+      if (textFlagged === null || coverFlagged === null) console.warn('Livro novo sem moderação', bookId);
+      return;
+    }
+
+    const owner = book.createdBy ?? '';
+    const shelfRef = owner ? db.doc(`users/${owner}/shelf/${bookId}`) : null;
+    const action = textFlagged ? 'deleted' : 'coverRemoved';
+    if (textFlagged) {
+      const logs = owner
+        ? await db.collection(`users/${owner}/logs`).where('bookId', '==', bookId).get()
+        : null;
+      const writer = db.bulkWriter();
+      void writer.delete(snap.ref);
+      if (shelfRef) void writer.delete(shelfRef);
+      logs?.docs.forEach((doc) => void writer.delete(doc.ref));
+      await writer.close();
+    } else {
+      await snap.ref.update({ coverUrl: '' });
+      if (shelfRef) await shelfRef.update({ coverUrl: '' }).catch(() => undefined);
+    }
+    await deleteUploadedCover(`covers/${bookId}.jpg`);
+    await db.collection('moderationLog').add({
+      bookId,
+      title: book.title,
+      createdBy: owner,
+      action,
+      textFlagged: !!textFlagged,
+      coverFlagged: !!coverFlagged,
+      createdAt: Date.now(),
+    });
+  },
+);
 
 /**
  * Edita um livro do catálogo (RN-06). Para editores, a alteração vale na hora; para os demais,

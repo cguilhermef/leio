@@ -129,7 +129,23 @@ Vale para quem não é editor, em duas etapas:
 **Onde:** functions `editBook`, `moderateEdit`, `isFlagged`, `reviewWithAi`, `askModel`;
 `pages/notifications.ts` (motivo exibido ao editor).
 **Decidido em:** 15/10/2026, para não depender de um editor em cada correção.
-**Interage com:** RN-06, RN-07, RN-08, tensões 2, 6 e 7.
+**Interage com:** RN-06, RN-07, RN-08, RN-10, tensões 2 e 7.
+
+## RN-10 · Moderação de livros novos
+
+- O app cadastra livros direto no Firestore. Logo depois, um gatilho passa o texto (título,
+  subtítulo, autores, editora, edição) e a capa, separadamente, pela moderação da OpenAI
+  (`omni-moderation-latest`, gratuita, sem consumir o limite da RN-08).
+- **Capa imprópria:** a capa é removida do livro e da estante de quem cadastrou, e o arquivo é
+  apagado do Storage.
+- **Texto impróprio:** o livro é apagado do catálogo, junto com a entrada na estante e os
+  registros de leitura de quem cadastrou.
+- Cada decisão fica em `moderationLog` (sem acesso pelo app). Se a moderação não responder, o
+  livro fica como está.
+
+**Onde:** function `moderateNewBook`, `isFlagged`; `core/catalog.service.ts` (`create`).
+**Decidido em:** 15/10/2026.
+**Interage com:** RN-03, RN-09, tensão 6.
 
 ---
 
@@ -155,9 +171,11 @@ definição explícita. Revise esta lista ao mudar qualquer regra citada.
    `min` (RN-02), mas a página atual fica acima do total até o próximo registro.
 5. **Livro lido sem data (RN-03 × RN-04).** Não conta para a meta nem para as estatísticas por
    período, mesmo que tenha sido lido no ano.
-6. **Cadastro de livro novo sem moderação (RN-09).** O app cria livros direto no Firestore
-   (`firestore.rules`, `/books` `create`), sem passar por function. Capa e texto de um livro novo
-   não são moderados; só as edições posteriores.
+6. **Moderação de livro novo depois do cadastro (RN-10).** Como o app grava o livro direto, a
+   moderação roda segundos depois: nesse intervalo o livro aparece na busca. A remoção também
+   não avisa quem cadastrou (o livro ou a capa somem da estante). Se o gatilho rodar antes de o
+   livro entrar na estante, a entrada fica órfã. A moderação de livros novos não usa a revisão
+   pelo modelo, então uma capa inofensiva mas errada passa.
 7. **Edição aplicada pela IA sem desfazer (RN-09).** O valor anterior fica guardado em
    `bookEdits.before`, mas ainda não há tela para o editor ver as edições aplicadas
    automaticamente nem para desfazê-las.
