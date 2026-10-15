@@ -41,6 +41,15 @@ storage.rules      regras do Storage (capas)
   média de páginas do usuário. O total é dividido pelas semanas restantes do ano.
 - **Limite de usuários**: os primeiros 50 que entram recebem acesso (custom claim `allowed`).
   Para alterar, defina o parâmetro `MAX_USERS` das functions.
+- **Editores do catálogo**: quem tem o custom claim `role: 'editor'` edita livros na hora e revisa
+  as sugestões de edição dos demais. O claim é definido pelo script abaixo, com o JSON da conta de
+  serviço do projeto salvo na raiz (fora do git) e o `npm install` das functions feito:
+  ```sh
+  npm run editor -- add maria@exemplo.com
+  npm run editor -- remove maria@exemplo.com
+  npm run editor -- list
+  ```
+  O papel novo vale na próxima vez que a pessoa abrir o app.
 
 ## Configuração inicial
 

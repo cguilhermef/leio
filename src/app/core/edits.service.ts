@@ -1,5 +1,5 @@
-import { Injectable, effect, inject, signal } from '@angular/core';
-import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { AuthService } from './auth.service';
 import { callFunction, db } from './firebase';
 import { BookEdit } from './models';
@@ -9,23 +9,12 @@ import { BookEdit } from './models';
 export class EditsService {
   private auth = inject(AuthService);
 
-  readonly isEditor = signal(false);
+  /** Editores têm o custom claim `role: 'editor'`. */
+  readonly isEditor = computed(() => this.auth.state() === 'ready' && this.auth.role() === 'editor');
   /** Sugestões aguardando revisão (só carregadas para editores). */
   readonly pending = signal<BookEdit[]>([]);
 
   constructor() {
-    effect((onCleanup) => {
-      const uid = this.auth.state() === 'ready' ? this.auth.uid() : '';
-      this.isEditor.set(false);
-      if (!uid) return;
-      const unsub = onSnapshot(
-        doc(db, 'meta', 'roles'),
-        (snap) => this.isEditor.set(((snap.get('editors') as string[] | undefined) ?? []).includes(uid)),
-        () => this.isEditor.set(false),
-      );
-      onCleanup(unsub);
-    });
-
     effect((onCleanup) => {
       this.pending.set([]);
       if (!this.isEditor()) return;

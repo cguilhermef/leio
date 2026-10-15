@@ -562,10 +562,9 @@ const TEXT_FIELDS = ['subtitle', 'publisher', 'edition'] as const;
 const SHELF_FIELDS = ['title', 'authors', 'coverUrl', 'pages'] as const;
 const RECOMMENDATION_FIELDS = ['title', 'authors', 'coverUrl'] as const;
 
-/** Editores ficam em `meta/roles.editors` (lista de uids), alterada só pelo console ou pelo servidor. */
-async function isEditor(uid: string): Promise<boolean> {
-  const roles = await db.doc('meta/roles').get();
-  return ((roles.get('editors') as string[] | undefined) ?? []).includes(uid);
+/** Editores têm o custom claim `role: 'editor'`, definido pelo script `npm run editor`. */
+function isEditor(request: CallableRequest): boolean {
+  return request.auth?.token['role'] === 'editor';
 }
 
 function invalid(message: string): never {
@@ -684,7 +683,7 @@ export const editBook = onCall(async (request) => {
   const diff = changedFields(book, changes);
   if (!Object.keys(diff).length) invalid('Nenhum dado foi alterado.');
 
-  if (await isEditor(uid)) {
+  if (isEditor(request)) {
     await applyBookEdit(bookId, diff, uid);
     return { applied: true };
   }
@@ -707,7 +706,7 @@ export const editBook = onCall(async (request) => {
 /** Um editor aprova (aplicando as alterações) ou recusa uma sugestão de edição. */
 export const reviewBookEdit = onCall(async (request) => {
   const { uid } = requireAllowed(request);
-  if (!(await isEditor(uid))) throw new HttpsError('permission-denied', 'Só editores revisam sugestões.');
+  if (!isEditor(request)) throw new HttpsError('permission-denied', 'Só editores revisam sugestões.');
   const { editId, approve } = (request.data ?? {}) as { editId?: string; approve?: boolean };
   if (!editId) invalid('Sugestão inválida.');
 
