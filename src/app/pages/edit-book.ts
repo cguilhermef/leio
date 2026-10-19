@@ -71,6 +71,11 @@ import { Icon } from '../shared/icon';
             </div>
           </div>
           @if (searched()) {
+            @if (onlineFailed()) {
+              <p class="muted small">
+                A busca por capas está temporariamente indisponível. Tente novamente em alguns minutos.
+              </p>
+            }
             @if (visibleEditions().length) {
               <ul class="covers">
                 @for (ed of visibleEditions(); track ed.coverUrl) {
@@ -84,7 +89,7 @@ import { Icon } from '../shared/icon';
                   </li>
                 }
               </ul>
-            } @else {
+            } @else if (!onlineFailed()) {
               <p class="muted small">Nenhuma capa encontrada online para este título e autor.</p>
             }
           }
@@ -152,6 +157,7 @@ export class EditBookPage {
   protected readonly sent = signal(false);
 
   protected readonly searched = signal(false);
+  protected readonly onlineFailed = signal(false);
   private readonly editions = signal<OnlineEdition[]>([]);
   /** Capas que não carregaram ou são apenas o aviso de "imagem indisponível". */
   private readonly hiddenCovers = signal(new Set<string>());
@@ -199,8 +205,8 @@ export class EditBookPage {
       const result = await this.catalog.search(draft.title, draft.authors);
       this.editions.set(result.editions);
       this.hiddenCovers.set(new Set());
+      this.onlineFailed.set(result.onlineFailed);
       this.searched.set(true);
-      if (result.onlineFailed) this.error.set('A busca online não respondeu agora. Tente novamente em instantes.');
     });
   }
 

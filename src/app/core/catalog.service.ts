@@ -28,7 +28,10 @@ export interface OnlineEdition {
 export interface SearchResult {
   matches: Book[];
   editions: OnlineEdition[];
-  /** As fontes online falharam (erro ou indisponibilidade), em vez de não terem resultados. */
+  /**
+   * O Google Books, fonte principal de capas, falhou (erro ou indisponibilidade), em vez de não
+   * ter resultados. As edições podem vir só da Open Library.
+   */
   onlineFailed: boolean;
 }
 

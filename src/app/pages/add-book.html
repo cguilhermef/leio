@@ -143,6 +143,12 @@
       @case ('covers') {
         <section>
           <h2>Escolha a capa</h2>
+          @if (onlineFailed()) {
+            <p class="muted">
+              A busca por capas está temporariamente indisponível. Tente novamente em alguns minutos.
+              Você pode editar a capa posteriormente também.
+            </p>
+          }
           @if (visibleEditions().length) {
             <p class="muted">Toque na capa da sua edição. Os dados dela preenchem o cadastro.</p>
             <ul class="covers">
@@ -157,9 +163,7 @@
                 </li>
               }
             </ul>
-          } @else if (onlineFailed()) {
-            <p class="muted">A busca online não respondeu agora. Tente novamente em instantes.</p>
-          } @else {
+          } @else if (!onlineFailed()) {
             <p class="muted">
               Não encontramos capas online para "{{ title() }}". Tente buscar de novo, corrigir o
               título ou usar uma foto como capa.

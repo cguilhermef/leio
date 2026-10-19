@@ -272,21 +272,29 @@ function yearFrom(value: unknown): number | null {
   return match ? Number(match[0]) : null;
 }
 
-/** Busca JSON, tentando de novo uma vez quando o serviço falha temporariamente (5xx, 429). */
+const FETCH_ATTEMPTS = 4;
+
+/**
+ * Busca JSON, tentando de novo quando o serviço falha temporariamente (5xx, 429), com espera
+ * crescente (0,5 s, 1 s, 2 s). O Google Books devolve 503 em boa parte das chamadas, mas
+ * costuma responder em uma das tentativas seguintes.
+ */
 async function fetchJson(url: string): Promise<any> {
   for (let attempt = 1; ; attempt++) {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (response.ok) return response.json();
     const transient = response.status >= 500 || response.status === 429;
-    if (!transient || attempt === 2) throw new Error(`HTTP ${response.status} em ${new URL(url).host}`);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    if (!transient || attempt === FETCH_ATTEMPTS) throw new Error(`HTTP ${response.status} em ${new URL(url).host}`);
+    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
   }
 }
 
 /**
- * Busca no Google Books em etapas, da consulta mais precisa para a mais ampla, até reunir
- * edições suficientes. Os filtros intitle/inauthor usam aspas: sem elas, o Google aplica o
- * filtro só à primeira palavra (em "O portador do fogo", apenas a "O").
+ * Busca no Google Books em etapas, da consulta mais precisa para a mais ampla, parando na
+ * primeira que trouxer edições do livro. Os filtros intitle/inauthor usam aspas: sem elas, o
+ * Google aplica o filtro só à primeira palavra (em "O portador do fogo", apenas a "O").
+ * Se uma consulta falha mesmo depois das novas tentativas, o Google está fora do ar: as
+ * consultas seguintes falhariam também, então desiste logo.
  */
 async function searchGoogleBooks(title: string, authors: string[]): Promise<OnlineEdition[]> {
   const clean = (text: string) => text.replace(/"/g, '').trim();
@@ -298,27 +306,20 @@ async function searchGoogleBooks(title: string, authors: string[]): Promise<Onli
     a ? `${t} ${a}` : t,
   ];
 
-  const found: OnlineEdition[] = [];
-  const seen = new Set<string>();
-  let failures = 0;
   for (const q of queries) {
+    let editions: OnlineEdition[];
     try {
-      // Descarta resultados de outros livros/autores que as consultas mais amplas trazem.
-      for (const edition of rankEditions(await googleBooksQuery(q), title, authors)) {
-        if (!seen.has(edition.coverUrl)) {
-          seen.add(edition.coverUrl);
-          found.push(edition);
-        }
-      }
+      editions = await googleBooksQuery(q);
     } catch (error) {
-      failures++;
       console.warn('Google Books', q, error);
+      throw new Error('Google Books indisponível');
     }
-    if (found.length >= 6) break;
+    // Descarta resultados de outros livros/autores que as consultas mais amplas trazem.
+    const found = rankEditions(editions, title, authors);
+    if (found.length) return found;
   }
-  if (failures === queries.length) throw new Error('Google Books indisponível');
-  if (!found.length) console.info('Google Books sem resultados', { title, authors });
-  return found;
+  console.info('Google Books sem resultados', { title, authors });
+  return [];
 }
 
 /** Consulta o Google Books. Sem `withoutCover`, descarta volumes sem imagem de capa. */
@@ -391,22 +392,22 @@ export const searchBook = onCall({ secrets: [GOOGLE_BOOKS_API_KEY] }, async (req
   const cleanAuthors = (Array.isArray(authors) ? authors : []).map((a) => String(a).trim()).filter(Boolean);
   if (!cleanTitle) throw new HttpsError('invalid-argument', 'Informe o título do livro.');
 
-  let failedSources = 0;
+  let onlineFailed = false;
   const [matches, google, openLibrary] = await Promise.all([
     findSimilarBooks(cleanTitle, cleanAuthors),
     searchGoogleBooks(cleanTitle, cleanAuthors).catch((error) => {
-      failedSources++;
+      onlineFailed = true;
       console.warn('Google Books', error);
       return [] as OnlineEdition[];
     }),
     searchOpenLibrary(cleanTitle, cleanAuthors).catch((error) => {
-      failedSources++;
       console.warn('Open Library', error);
       return [] as OnlineEdition[];
     }),
   ]);
-  // Avisa o app quando a busca online falhou (e não apenas veio vazia), para sugerir nova tentativa.
-  const onlineFailed = failedSources === 2;
+  // Avisa o app quando o Google Books falhou (e não apenas veio vazio), para sugerir nova
+  // tentativa. Ele é a fonte principal: a Open Library sozinha costuma trazer capas de outras
+  // edições ou nenhuma, então o aviso vale mesmo que ela tenha respondido.
 
   // Mais relevantes primeiro; no empate, Google Books (melhor para edições brasileiras).
   const seen = new Set<string>();
