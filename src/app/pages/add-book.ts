@@ -13,7 +13,7 @@ import { BookForm, EMPTY_BOOK_FORM, draftFromForm, mergeCatalogCard, splitAuthor
 import { CatalogService, OnlineEdition } from '../core/catalog.service';
 import { errorMessage } from '../core/firebase';
 import { resizeImage } from '../core/image';
-import { Book, ShelfStatus } from '../core/models';
+import { Book, STATUS_LABEL, ShelfStatus } from '../core/models';
 import { ShelfService } from '../core/shelf.service';
 import { authorsLabel, isoDate } from '../core/text';
 import { BookCover } from '../shared/book-cover';
@@ -71,6 +71,10 @@ export class AddBookPage {
   protected readonly cardRead = signal(false);
   protected readonly form = signal<BookForm>({ ...EMPTY_BOOK_FORM });
   protected readonly finishedDate = signal(isoDate());
+  protected readonly statuses: ShelfStatus[] = ['toread', 'reading', 'read'];
+  protected readonly statusLabel = STATUS_LABEL;
+  /** Situação com que o livro entra na estante; só é salva ao tocar em "Adicionar livro". */
+  protected readonly status = signal<ShelfStatus>('toread');
   private readonly readDialog = viewChild<ElementRef<HTMLDialogElement>>('readDialog');
 
   protected readonly stepIndex = computed(() => {
@@ -259,8 +263,14 @@ export class AddBookPage {
     else this.step.set('photo');
   }
 
-  /** "Lido" pede a data de conclusão antes de salvar. */
-  protected askFinishedDate() {
+  /** Salva com a situação escolhida; "Lido" pede antes a data de conclusão. */
+  protected submit() {
+    const status = this.status();
+    if (status === 'read') this.askFinishedDate();
+    else this.save(status);
+  }
+
+  private askFinishedDate() {
     this.finishedDate.set(isoDate());
     this.readDialog()?.nativeElement.showModal();
   }

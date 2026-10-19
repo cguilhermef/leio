@@ -218,7 +218,7 @@
           }
         </div>
 
-        <form class="details" (ngSubmit)="save('toread')">
+        <form class="details" (ngSubmit)="submit()">
           <div class="form-head">
             @if (coverImage()) {
               <img class="preview small-preview" [src]="coverImage()" alt="Capa escolhida" />
@@ -231,11 +231,15 @@
             <p class="error">{{ error() }}</p>
           }
 
-          <p class="save-label">Salvar em:</p>
+          <p class="save-label" id="status-label">Situação do livro:</p>
+          <div class="segmented" role="radiogroup" aria-labelledby="status-label">
+            @for (s of statuses; track s) {
+              <button type="button" role="radio" [attr.aria-checked]="status() === s" [class.active]="status() === s"
+                (click)="status.set(s)">{{ statusLabel[s] }}</button>
+            }
+          </div>
           <div class="actions save">
-            <button type="submit" class="btn">Lerei</button>
-            <button type="button" class="btn secondary" (click)="save('reading')">Lendo</button>
-            <button type="button" class="btn secondary" (click)="askFinishedDate()">Lido</button>
+            <button type="submit" class="btn">Adicionar livro</button>
           </div>
         </form>
       }

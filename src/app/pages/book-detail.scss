@@ -9,15 +9,6 @@
 
 .notice { background: var(--olive-100); margin-bottom: 12px; }
 
-.segmented {
-  display: flex; padding: 4px; border-radius: 999px; background: var(--cream-200); margin-bottom: 12px;
-  button {
-    flex: 1; min-height: 38px; border: 0; border-radius: 999px; background: transparent;
-    color: var(--muted); font-weight: 600; cursor: pointer;
-  }
-  button.active { background: var(--surface); color: var(--olive-900); box-shadow: 0 1px 3px rgb(46 50 34 / 15%); }
-}
-
 .block { display: flex; flex-direction: column; gap: 8px; }
 .block .actions { margin-top: 8px; }
 .pages-form { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 12px; }
